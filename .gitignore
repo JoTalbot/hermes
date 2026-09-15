@@ -1,0 +1,34 @@
+# === hard rule: nothing secret, nothing runtime ===
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+*.p12
+*.kdbx
+secrets/
+token*
+*_token
+authorized_keys
+sessions/
+logs/
+cache/
+*.log
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+dist/
+# runtime state stays on the server; only state/README.md is tracked
+state/*
+!state/README.md
+# audit scratch — must never be committed
+audit*.sh
+probe.sh
+*.pub
+*.ppk

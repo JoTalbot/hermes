@@ -1,0 +1,16 @@
+project: octopus-deploy
+status: unaudited
+facts:
+- kind: FACT
+  note: checked out at /opt/octopus-deploy on branch (detached); remote https://github.com/JoTalbot/octopus-deploy;
+    0 uncommitted paths at audit
+observations: []
+hypotheses: []
+decisions: []
+incidents: []
+lessons: []
+unknowns:
+- build command
+- test command
+- deploy path
+- runtime dependencies

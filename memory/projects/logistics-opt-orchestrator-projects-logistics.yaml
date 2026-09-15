@@ -1,0 +1,16 @@
+project: logistics-opt-orchestrator-projects-logistics
+status: unaudited
+facts:
+- kind: FACT
+  note: checked out at /opt/orchestrator/projects/logistics on branch main; remote https://github.com/JoTalbot/logistics;
+    0 uncommitted paths at audit
+observations: []
+hypotheses: []
+decisions: []
+incidents: []
+lessons: []
+unknowns:
+- build command
+- test command
+- deploy path
+- runtime dependencies

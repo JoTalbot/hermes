@@ -1,0 +1,35 @@
+[Unit]
+Description=Hermes <-> Octopus AIOS OpenAI-compatibility shim
+Documentation=file:///opt/hermes/docs/BALANCER.md
+After=network.target octopus-aios.service
+After=hermes-env-guard.service
+Wants=octopus-aios.service
+Wants=hermes-env-guard.service
+
+[Service]
+Type=simple
+# Dedicated unprivileged user. NOT root, NOT ubuntu — ubuntu's ~/.hermes is
+# owned by the live liza Telegram bridge and must not be mutated by us.
+User=hermes
+Group=hermes
+Environment=HERMES_HOME=/home/hermes/.hermes
+EnvironmentFile=-/etc/hermes/shim.env
+ExecStart=/usr/bin/python3 /opt/hermes/deploy/shim/aios_openai_shim.py
+Restart=always
+RestartSec=3
+
+# --- hardening: this process should never need more than localhost egress ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET
+RestrictNamespaces=true
+MemoryDenyWriteExecute=false
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

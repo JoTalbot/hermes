@@ -1,0 +1,29 @@
+[Unit]
+Description=Hermes WebUI + JSON-RPC/WS gateway (dashboard) for browser + Android
+Documentation=file:///opt/hermes/docs/RUNBOOK.md
+After=network-online.target hermes-shim.service
+After=hermes-env-guard.service
+Wants=hermes-shim.service
+Wants=hermes-env-guard.service
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+Environment=HERMES_HOME=/home/hermes/.hermes
+EnvironmentFile=-/etc/hermes/shim.env
+# CORRECTED 2026-09-15: was `hermes serve`, which is the DESKTOP (Electron)
+# backend and exits with "no packaged desktop app found at .../release".
+# `hermes dashboard` is the headless WebUI and serves the dist bundled inside
+# the pip package (hermes_cli/web_dist) — no npm, no Electron needed.
+# Loopback only. `--insecure` is a no-op since the June-2026 hardening; remote
+# access comes from Tailscale or an SSH tunnel, never a public bind.
+ExecStart=/home/hermes/.local/bin/hermes dashboard --host 127.0.0.1 --port 9119 --skip-build --no-open
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+project: fs
+status: unaudited
+facts:
+- kind: FACT
+  note: repo https://github.com/JoTalbot/fs exists on GitHub; language Python; last push 2026-09-15; 848 KB
+observations: []
+hypotheses: []
+decisions: []
+incidents: []
+lessons: []
+unknowns:
+- local path /opt/fs presence/absence
+- build command
+- test command
+- deploy path
+- runtime dependencies

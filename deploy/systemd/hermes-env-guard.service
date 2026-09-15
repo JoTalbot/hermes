@@ -1,0 +1,20 @@
+[Unit]
+Description=Hermes secret-env guard (self-heal /etc/hermes/shim.env before agents start)
+Documentation=file:///opt/hermes/RECOVERY.md
+Before=hermes-shim.service hermes-serve.service
+ConditionPathExists=/opt/hermes/scripts/ensure-shim-env.sh
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# root on purpose: must be able to read /etc (0600) and rewrite it. The script
+# is tiny, prints no secrets, and is idempotent. NOT hardened with ProtectSystem
+# because writing /etc/hermes/shim.env is its entire job.
+ExecStart=/opt/hermes/scripts/ensure-shim-env.sh
+# A guard that loops is worse than a guard that gives up: the caller units
+# depend on it, and a real failure belongs in the doctor, loudly.
+Restart=no
+TimeoutStartSec=20
+
+[Install]
+WantedBy=multi-user.target

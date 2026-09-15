@@ -1,0 +1,59 @@
+# Global agent policy. Enforced by wrappers in skills/, documented in
+# docs/SECURITY.md. A policy the agents can simply ignore is decoration.
+version: 1
+
+defaults:
+  approval_required: true            # destructive ops pause for a human
+  max_turns_per_task: 40
+  network_egress: deny               # agents get no internet by default
+  filesystem:
+    read: ["*", "/etc", "/opt"]
+    write: ["/opt/hermes/state", "/tmp/hermes-*", "$HOME/projects"]
+  secrets:
+    read: false                      # agents never read ~/.hermes/.env or /etc/octopus/*
+    echo_in_output: forbidden        # a tool result containing a key must be redacted
+  commits:
+    allowed: true
+    require_secret_scan: true        # scripts/secret-scan.sh --staged must pass
+    forbid_force_push: true
+    forbid: ["main", "release/*"]    # agents push branches, humans merge
+
+per_role:
+  orchestrator:
+    can_spawn_agents: true
+    can_delegate_tasks: true         # via `hermes kanban` (see docs/COMMUNICATION.md)
+    can_run_shell: false             # orchestrator plans; it does not execute
+  server-guardian:
+    can_run_shell: true
+    shell_allowlist: [df, free, uptime, systemctl, journalctl, ss, ip, docker ps, docker logs, ps, top -bn1]
+    shell_denylist: [rm, mkfs, dd, shutdown, reboot, iptables, ufw, userdel, chmod 777]
+    service_control: ["hermes-*"]    # may only touch Hermes' own units
+  github:
+    can_run_shell: true
+    shell_allowlist: [git, gh]
+    write_scope: ["JoTalbot/hermes"] # other repos: read-only until user opts in
+  security:
+    can_run_shell: true
+    shell_allowlist: [ss, ip, grep, find, stat, ls, systemctl, journalctl, apt, dpkg-query, trivy]
+    read_only: true                  # remediation is a PROPOSAL, never an action
+    destructive_operations: forbidden
+  monitoring:
+    can_run_shell: true
+    shell_allowlist: [curl, systemctl, journalctl, ss, df, free, uptime]
+    alerts_via: ["octopus-events-api", "telegram-hermes"]
+  backup:
+    can_run_shell: true
+    shell_allowlist: [tar, gzip, rsync, pg_dump, git]
+    targets: ["/opt/hermes/state/backups", "restic:*"]
+    never_read: ["/etc/octopus/secrets.env", "/home/ubuntu/.hermes/.env"]
+  project-agent:
+    can_run_shell: true
+    workdir: "$PROJECT_PATH"         # jailed to its own project
+    git_push: branch-only
+
+incident_escalation:
+  # A failed check must not silently page a human at 3am for a known issue.
+  known_ignores:
+    - check: "disk_root_lt_85_percent"
+      reason: "pre-existing Octopus SLO, failing since before Hermes was installed; tracked in memory/incidents/2026-09-15-disk-pressure.md"
+      recheck: "after storage remediation"

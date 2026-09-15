@@ -1,0 +1,49 @@
+# Server manifest. Stable ID, measured facts, and the neighbour map every
+# agent must know before it touches anything. (master-task §23)
+server:
+  id: srv-oci-arm-01            # stable + unique. NEVER derived from hostname or IP.
+  name: arm-server-01
+  hostname: arm-server-01
+  environment: production
+  region: oci-self               # Oracle Cloud, self-managed ARM shape
+  public_ip: 129.213.177.56
+  private_ip: 10.0.0.3
+  ssh_user: ubuntu
+  registered_at: "2026-09-15"
+
+measured:                        # audited 2026-09-15, do not hand-edit these numbers
+  os: Ubuntu 24.04.4 LTS
+  kernel: 6.17.0-1020-oracle
+  arch: aarch64                  # ARM — matters: many prebuilt images are amd64-only
+  cpu: 4 cores (Neoverse-N1)
+  memory_gib: 23
+  swap: 2G /swapfile (priority -2)
+  disk_root: "145G total, 94% used (9.5G free at audit time — volatile, recheck before installs)"
+  load_at_audit: "4.95 / 4.15 / 4.20 on 4 cores → ~100% loaded, busy box"
+  filesystem: ext4
+  init: systemd 255
+
+neighbours:                      # DO NOT BREAK THESE. They are the blast radius.
+  llm_balancer: {service: octopus-aios.service, port: 9600, kind: "FastAPI, NOT OpenAI-compatible", endpoints: ["POST /api/v1/aios/ask {goal}", "POST /api/v1/aios/execute {goal}", "GET /api/v1/aios/tasks/{id}", "POST /api/v1/aios/debate", "GET /health"], providers: 11, tiers: [fast, code, reasoning, long_context, local]}
+  liza_mock: {service: liza-mock.service, port: 8000, note: "OpenAI-compatible MOCK serving model 'gemini-rpa' via Playwright→Gemini web RPA. This is what legacy Hermes is pointed at TODAY."}
+  telegram_hermes_bridge: {service: telegram-hermes.service, depends_on: [liza-mock], note: "sets HERMES_BIN=/home/ubuntu/hermes-venv/bin/hermes — coupling! Reconfiguring ubuntu's ~/.hermes silently re-routes this bot."}
+  octopus_swarm: {units: "octopus-child@8300-8305 (6 nodes, docker, octopus-current:latest)", ports: "8300-8310/udp, 9300-9310/udp, 10300-10310/tcp, 10010/tcp"}
+  webhook_gateway: {port: 9610, service: octopus-webhook-gateway.service}
+  browser_api: {port: 8095, service: octopus-browser.service, note: "exposed on 0.0.0.0, ufw does not list it → OCI security list decides"}
+  rag_search: {port: 9555, health: "green"}
+  ollama: {port: 11434, proxy: 11435, role: "local models + RAG embeddings"}
+  logistics_control: {port: 8787, note: "control_plane=true, agent_name=arm-server-01, model=auto"}
+  nginx: {tls_host: api.autosklo.org.ua, upstream: "127.0.0.1:8090 (madworld-api)", certs: /etc/nginx/ssl/}
+  monitoring: {prometheus: "127.0.0.1:9090 (docker)", grafana: "127.0.0.1:3000 (docker, login-gated)", slo_checker: "octopus-slo-checker.service (15 checks, 14 pass)"}
+  hermes_legacy: {install: "/home/ubuntu/hermes-venv (pip, v0.19.0, 2026.7.20)", home: /home/ubuntu/.hermes, binary: /usr/local/bin/hermes, note: "root-owned symlink from a previous setup"}
+
+known_problems:
+  - {id: disk-pressure, severity: blocking, detail: "root fs at 85-98% across the audit window; 88G lives in /var/lib. Fails the Octopus SLO disk_root_lt_85_percent."}
+  - {id: exposed-cdp, severity: critical, detail: "0.0.0.0:9222 (CDP, HTTP 200) and 0.0.0.0:6080 (noVNC) on a host with a public IP. Unauthenticated CDP = full control of a logged-in Google session."}
+  - {id: postgres-world-listener, severity: high, detail: "5434 listening on 0.0.0.0/[::] with ufw rule LIMIT IN from Anywhere (logistics control-plane postgres)."}
+  - {id: broken-units, severity: low, detail: "octopus-slo-checker fails every ~30s (disk SLO); a cron timer restarts missing octopus-devpanel.service every 2min."}
+  - {id: no-tailscale, severity: medium, detail: "the planned Android→Tailscale→HTTPS path has no transport installed."}
+  - {id: leaked-credentials-in-chat, severity: critical, detail: "SSH private key + GitHub PAT with admin:org/delete_repo pasted into a chat context. Rotate both. See memory/incidents/2026-09-15-credential-exposure.md"}
+
+capabilities: [docker, podman-absent, postgres16, nginx, node22, python3.12, java17, android-sdk+adb, go-toolchain-in-/opt/go, git, gh, tmux, rsync]
+missing: [tailscale, redis, caddy, traefik, prometheus-native, grafana-native, restic, borg, rclone, uv, pipx]

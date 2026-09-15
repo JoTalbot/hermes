@@ -1,0 +1,37 @@
+# Model routing policy — mirrors config.yaml written by scripts/install.sh.
+# Everything resolves to the loopback shim, which forwards to the Octopus AIOS
+# balancer (127.0.0.1:9600, 11 providers, 5 tiers, weighted + health-gated).
+#
+# WHY these are tier aliases and not real model names: the balancer routes by
+# TIER, and reports per-provider health itself. Hermes therefore gets a stable
+# menu that survives providers being swapped out underneath it — adding a 12th
+# key or dropping a dead provider changes nothing here. That is the actual
+# "automatic failover between endpoints" the master task asked for, and it
+# lives in ONE place (the balancer), not in every agent.
+provider: custom
+base_url: http://127.0.0.1:9700/v1
+# api_key is injected from /etc/hermes/shim.env — never a literal here.
+
+models:
+  hermes-auto:   # default. balancer decides from weight + health
+    tier: null
+    use_for: [orchestrator, project-agents]
+  hermes-fast:   # cerebras-llama3.3-70b, groq-gpt-oss-20b, groq-qwen3.8-27b
+    tier: fast
+    use_for: [monitoring, server-guardian, classification, summarise]
+  hermes-code:   # mistral-small, hf-Qwen2.5-72B-Instruct
+    tier: code
+    use_for: [github, deployment, project-agents]
+  hermes-reason: # groq-gpt-oss-120b
+    tier: reasoning
+    use_for: [security-audit, incident-analysis, architecture]
+  hermes-long:   # gemini-2.5-flash, liza-rpa-gemini-web
+    tier: long_context
+    use_for: [repo-wide-audit, memory-retrieval, log-triage]
+  hermes-local:  # ollama qwen2.5:1.5b / llama3.2:3b — free, offline, weak
+    tier: local
+    use_for: [heartbeat-pings, cheap-retries, last-resort-fallback]
+
+fallback_chain: [hermes-auto, hermes-fast, hermes-local]
+# `hermes fallback` manages provider-level retry; the shim returns HTTP 502 with
+# upstream_status so that chain actually triggers instead of hanging.

@@ -1,0 +1,15 @@
+project: aios
+status: unaudited
+facts:
+- kind: FACT
+  note: checked out at /opt/aios on branch main; remote JoTalbot/AIOS; 42 uncommitted paths at audit
+observations: []
+hypotheses: []
+decisions: []
+incidents: []
+lessons: []
+unknowns:
+- build command
+- test command
+- deploy path
+- runtime dependencies

@@ -1,0 +1,16 @@
+project: proj-orchestrator
+status: unaudited
+facts:
+- kind: FACT
+  note: checked out at /opt/orchestrator on branch main; remote https://github.com/JoTalbot/orchestrator; 18 uncommitted
+    paths at audit
+observations: []
+hypotheses: []
+decisions: []
+incidents: []
+lessons: []
+unknowns:
+- build command
+- test command
+- deploy path
+- runtime dependencies

@@ -1,0 +1,43 @@
+generated: '2026-09-15'
+method: cross-reference of `find / -xdev -name .git` on srv-oci-arm-01 with the JoTalbot GitHub API
+active_project_agents:
+- browser
+- fs
+- game
+- liza
+- logistics
+- orchestrator
+- transcribe
+- ukraine
+- words
+on_disk_but_no_github_agent:
+  /home/ubuntu/batch18-oci,/home/ubuntu/batch19-oci,/home/ubuntu/batch20-oci: words origin; local batch/* working
+    branches, no upstream tracking
+  /opt/octopus-deploy: origin=none — local-only deploy working copy, 6 dirty files
+  /root/agents/-Octopus/repo: origin=none, root-owned; hosts octopus-skills-mcp-server
+  /root/logistics: second logistics checkout, 1 dirty file — duplicate-path risk
+github_only_no_server_checkout:
+- aios
+- aios2
+- aliexpress
+- autohelp
+- campus-bites-api
+- casino
+- ggvvvvvvv
+- growbox
+- laba
+- madworld
+- makrotest
+- money
+- refund
+- router
+- scan
+- soroban-lite-sdk
+- td
+- test
+- tgclone
+- thggggv
+- uasep
+policy: 'GitHub repos with no server checkout get NO agent: an agent that cannot read the code on the machine it
+  runs on becomes a confident hallucination. They stay listed here as on-demand clone candidates. Master-task §11:
+  ''не создавай фиктивные проекты''.'

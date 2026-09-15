@@ -1,0 +1,16 @@
+project: repo
+status: unaudited
+facts:
+- kind: FACT
+  note: checked out at /root/agents/-Octopus/repo on branch UNREADABLE; remote https://github.com/JoTalbot/repo;
+    0 uncommitted paths at audit
+observations: []
+hypotheses: []
+decisions: []
+incidents: []
+lessons: []
+unknowns:
+- build command
+- test command
+- deploy path
+- runtime dependencies

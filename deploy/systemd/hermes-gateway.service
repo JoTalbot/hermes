@@ -1,0 +1,37 @@
+[Unit]
+Description=Hermes gateway (agent-bus dispatcher + cron scheduler)
+Documentation=file:///opt/hermes/docs/COMMUNICATION.md
+After=network-online.target hermes-shim.service hermes-env-guard.service
+Wants=hermes-shim.service hermes-env-guard.service
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+Environment=HERMES_HOME=/home/hermes/.hermes
+Environment=PATH=/home/hermes/.hermes-venv/bin:/home/hermes/.local/bin:/usr/local/bin:/usr/bin:/bin
+# The model credential arrives here, never on the command line and never in the
+# unit file: `ps aux` shows the cmdline to every local user, an EnvironmentFile
+# does not. (Verified: passing the key via `env VAR=` in the cmdline leaked it
+# into journald during testing on 2026-09-15.)
+EnvironmentFile=-/etc/hermes/shim.env
+# KillMode=mixed: the gateway SPAWNS agent workers as its children and they must
+# outlive a single dispatch tick. A transient unit (systemd-run) or the default
+# cgroup-wide kill orphans spawned kanban tasks in "running" forever.
+KillMode=mixed
+TimeoutStopSec=60
+ExecStart=/home/hermes/.hermes-venv/bin/hermes gateway run
+Restart=always
+RestartSec=10
+# Hermes' dispatcher refuses to run as a standalone `kanban daemon` because the
+# gateway owns it now ("DEPRECATED — the dispatcher now runs inside the
+# gateway"). This unit therefore runs the gateway, which is the supported path:
+# messaging platforms stay disabled, cron + kanban dispatch are active.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

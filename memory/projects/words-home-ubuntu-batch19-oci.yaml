@@ -1,0 +1,16 @@
+project: words-home-ubuntu-batch19-oci
+status: unaudited
+facts:
+- kind: FACT
+  note: checked out at /home/ubuntu/batch19-oci on branch feat/m1-batch19-schema-migrations; remote https://github.com/JoTalbot/words;
+    0 uncommitted paths at audit
+observations: []
+hypotheses: []
+decisions: []
+incidents: []
+lessons: []
+unknowns:
+- build command
+- test command
+- deploy path
+- runtime dependencies

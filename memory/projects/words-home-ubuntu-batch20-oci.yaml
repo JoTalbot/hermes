@@ -1,0 +1,16 @@
+project: words-home-ubuntu-batch20-oci
+status: unaudited
+facts:
+- kind: FACT
+  note: checked out at /home/ubuntu/batch20-oci on branch main; remote https://github.com/JoTalbot/words; 0 uncommitted
+    paths at audit
+observations: []
+hypotheses: []
+decisions: []
+incidents: []
+lessons: []
+unknowns:
+- build command
+- test command
+- deploy path
+- runtime dependencies

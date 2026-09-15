@@ -1,0 +1,16 @@
+project: words
+status: unaudited
+facts:
+- kind: FACT
+  note: repo https://github.com/JoTalbot/words exists on GitHub; language Go; last push 2026-09-15; 10302 KB
+observations: []
+hypotheses: []
+decisions: []
+incidents: []
+lessons: []
+unknowns:
+- local path /opt/words presence/absence
+- build command
+- test command
+- deploy path
+- runtime dependencies
