@@ -1,7 +1,7 @@
 # Hermes Agent OS на arm-server-01 — финальный отчёт
 
 **Дата:** 2026-09-15 · **Сервер:** `ubuntu@129.213.177.56` (`arm-server-01`, id `srv-oci-arm-01`, Ubuntu 24.04.4 LTS, aarch64, 4 CPU, 23 GiB RAM)
-**Репозиторий:** [JoTalbot/hermes](https://github.com/JoTalbot/hermes) · ветка `main` · последний коммит `411cc2b`
+**Репозиторий:** [JoTalbot/hermes](https://github.com/JoTalbot/hermes) · ветка `main` · последний коммит `2bb4889`
 **Режим работы:** код сервисов не правился. Изменения сделаны только там, где владелец их явно
 санкционировал — unit `hermes-serve` + `/etc/hermes/dashboard.env` (решение `plain_port`,
 2026-09-15) — и в инструментах самого Hermes (`scripts/backup.sh`, `verify-backup.sh`, `doctor.sh`,
