@@ -18,14 +18,17 @@ systemd-юниты бэкапа).
 проекту (`logistics-recurring-demand-scheduler-1`, Exited), а не к Hermes.
 
 ```
-SYSTEM HEALTH: DEGRADED (2 warnings)
+SYSTEM HEALTH: DEGRADED (1 warning)
+  [OK]   WebUI          hermes-serve active on 0.0.0.0:9119, password-gated (basic auth provider)
   [OK]   Tailscale      up on 100.109.170.74
   [OK]   Backup         hermes-state-20260915T163829Z.tar.gz — 0h old
   [OK]   BackupPerm     /var/backups/hermes is 0700
-  [WARN] GitHub         5 uncommitted paths   ← снимается коммитом этого отчёта
+  [OK]   GitHub         repository in sync (0 uncommitted, 0 ahead)
   [WARN] Docker         1 exited container(s): logistics-recurring-demand-scheduler-1
-18 OK / 2 WARN / 0 FAIL
+18 OK / 1 WARN / 0 FAIL
 ```
+
+Полный прогон тестов репозитория: **44 passed · 0 failed · 0 skipped**.
 
 **16 критериев: 15 PASS, 1 WARNING.** Единственный WARNING — **MULTI-SERVER**: второго сервера в
 инфраструктуре нет, поэтому федерация (регистрация ноды, кросс-серверная шина, общий Orchestrator на
