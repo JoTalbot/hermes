@@ -118,3 +118,67 @@ switching between available endpoints" is already implemented upstream of Hermes
 `grep -rlE '9600|aios-bridge' /etc/systemd/system/` returned **nothing**: the balancer is reached by
 clients that hardcode the port elsewhere. Starting a *new* consumer (the shim) cannot break an existing
 one. Do not change the balancer's bind address or port without that grep being re-run.
+
+## Silent truncation at 4000 characters — the most important fact in this file
+
+`llm_balancer.OpenAICompatibleCloudProvider.generate` does:
+
+```python
+messages.append({"role": "user", "content": prompt[:4000]})
+```
+
+Everything past character 4000 of the shim's `goal` is **invisible to the model**,
+and nothing anywhere reports that it was dropped. This produced the two most
+expensive failures of the build:
+
+- **FACT** A dispatched kanban task answered `Ready to assist. How can I help you
+  today?` — the tool schemas came first in the prompt, so the agent's actual
+  instructions were cut off entirely.
+- **FACT** With a long system contract plus 42 tools, the model replied
+  `{"content":""}` (well-formed, empty) and the worker exited with 0 tool calls,
+  three times, each costing a minute of dispatcher retry.
+
+The shim now assembles the goal against an explicit budget (`GOAL_BUDGET = 3900`)
+with the sections ordered by importance — `[task]` first, then `[recent]`,
+`[system]`, `[tools]`, then whatever history fits. If you change the shim, keep that
+order: it is not stylistic, it is the difference between working and not.
+
+`MAX_STRING_IN_HISTORY` and `TOOLS_BUDGET` bound the other contributors. If
+`llm_tool_block_degraded_total` climbs, tools are being rendered terser to fit — the
+model can still call them, but descriptions are gone.
+
+## The emergency fallback is not an answer
+
+When every provider fails, the balancer returns local boilerplate from
+`autonomous_heuristic_engine`:
+
+```
+AIOS Reasoner: Запрос '…' проанализирован автономным ядром кластера…
+```
+
+It arrives with `status: success`, so a naive client treats it as a completion. An
+agent then "completes" a task with no content, or wanders off into unrelated advice.
+The shim detects it (`provider` in the fallback set, or the marker phrases), retries
+once, and otherwise returns **503** — a visible failure is worth more than a silent
+non-answer.
+
+## What not to do (measured, 2026-09-15)
+
+- **Do not add a client-side circuit breaker.** One was tried: 24 fallbacks produced
+  **312** instant 503s, because Hermes retries a 5xx immediately and each retry
+  re-tripped the breaker. Opening the circuit turned a degraded pool into an outage.
+- **Do not add retry loops in the shim.** The balancer already walks its entire
+  provider list before falling back; a second call at the shim is pure amplification
+  against a pool that is already failing.
+- **Do not chase a single provider's health.** `gemini-2.5-flash` was observed
+  unhealthy for minutes at a time and the path kept working. Alert on
+  `llm_upstream_fallback_total`, not on one provider.
+
+## Tier hints are sent but ignored
+
+The shim maps `hermes-{fast,reason,code,long,local}` to a tier and puts it in the
+`goal` payload; `GoalRequest` has no `tier` field and `ask_llm()` never passes
+`task_type`, so `classify_task()` always decides. To make tier hints real, one line
+in `/opt/octopus-aios-server.py` is enough (`task_type=req.tier or "auto"`). Not
+done: it is a production service and the current behaviour is correct, just
+unoptimised.

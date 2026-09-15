@@ -22,8 +22,28 @@ set -euo pipefail
 
 ENV_FILE="/etc/hermes/shim.env"
 CANON="/var/backups/hermes/shim.env.canonical"
+HERMES_ETC="/etc/hermes"
 
 log() { printf '[ensure-shim-env] %s\n' "$*" >&2; }
+
+# --- directory-mode invariant (regression guard, seen TWICE) ------------------
+# Hermes' managed-scope loader stats /etc/hermes/.env even when that file does not
+# exist, and its fail-open try/except wraps get_managed_dir() but NOT the later
+# .exists() call:
+#     managed_env = managed_dir / ".env"
+#     if not managed_env.exists():        <-- raises PermissionError, not False
+# So a mode-0700/0750 /etc/hermes makes EVERY `hermes ...` invocation die with
+# "PermissionError: [Errno 13] Permission denied: '/etc/hermes/.env'" — including
+# `hermes kanban list`. It bit us twice on 2026-09-15: once from the original
+# install (0750) and once from a careless `install -d -m 0700 /etc/hermes`.
+# The secrets inside stay 0600; the DIRECTORY must stay traversable.
+if [[ -d "$HERMES_ETC" ]]; then
+  _mode="$(stat -c '%a' "$HERMES_ETC")"
+  if [[ "$_mode" != "755" ]]; then
+    chmod 755 "$HERMES_ETC"
+    log "FIXED $HERMES_ETC mode was $_mode, must be 755 (secrets inside stay 0600)"
+  fi
+fi
 
 _has_key() { [[ -s "$1" ]] && grep -q '^HERMES_BALANCER_API_KEY=' "$1"; }
 

@@ -1,0 +1,25 @@
+[Unit]
+Description=Hermes OS Prometheus metrics exporter (units, shim, balancer, agents, bus)
+Documentation=file:///opt/hermes/docs/RUNBOOK.md
+After=network-online.target hermes-shim.service
+Wants=hermes-shim.service
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+# Read-only probe. Reuses the existing Prometheus/Grafana stack instead of
+# standing up a second one; adds a scrape target, changes no existing target.
+Environment=HERMES_HOME=/home/hermes/.hermes
+ExecStart=/usr/bin/python3 /opt/hermes/scripts/hermes_metrics_exporter.py
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/opt/hermes /home/hermes
+RestrictAddressFamilies=AF_UNIX AF_INET
+
+[Install]
+WantedBy=multi-user.target

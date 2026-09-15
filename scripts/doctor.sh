@@ -14,11 +14,25 @@ ok(){   printf "[OK]   %-14s %s\n" "$1" "$2"; }
 warn(){ printf "[WARN] %-14s %s\n" "$1" "$2"; WARN=$((WARN+1)); }
 fail(){ printf "[FAIL] %-14s %s\n" "$1" "$2"; CRIT=$((CRIT+1)); }
 
-HERMES_BIN="${HERMES_BIN:-$HOME/.local/bin/hermes}"
+# --- agent-runtime defaults -------------------------------------------------
+# The agent OS runs as unix user `hermes` with its own venv and home. Without
+# these, running the doctor as root (which is how cron and humans run it) checked
+# $HOME/.hermes = /root/.hermes and reported "no profiles", "no kanban.db" and
+# "/root/.hermes/memories absent" on a machine where all three were fine. A
+# health check that lies is worse than no health check.
+export HERMES_HOME="${HERMES_HOME:-/home/hermes/.hermes}"
+HERMES_BIN="${HERMES_BIN:-/home/hermes/.hermes-venv/bin/hermes}"
 [[ -x "$HERMES_BIN" ]] || HERMES_BIN="$(command -v hermes || true)"
 SHIM_URL="${HERMES_SHIM_URL:-http://127.0.0.1:9700}"
 BRIDGE_URL="${AIOS_BRIDGE_URL:-http://127.0.0.1:9600}"
 REPO_DIR="${REPO_DIR:-/opt/hermes}"
+SECRET_ENV="${HERMES_SECRET_ENV:-/etc/hermes/shim.env}"
+
+# The end-to-end probe needs the loopback shim token. It is 0600 root, so this
+# only works when the doctor itself runs as root (cron does). Never printed.
+if [[ -z "${HERMES_BALANCER_API_KEY:-}" && -r "$SECRET_ENV" ]]; then
+  set -a; . "$SECRET_ENV"; set +a
+fi
 
 echo "=== Hermes OS doctor @ $(hostname) · $(date -Is) ==="
 
@@ -73,6 +87,15 @@ case "$e2e" in
   *)           warn "Inference" "answered but no DOCTOR_OK marker: ${e2e:0:70}" ;;
 esac
 
+# 4b. managed-scope dir mode (Hermes stats /etc/hermes/.env and raises instead of
+#     returning False when the DIRECTORY is not traversable — a 0700 /etc/hermes
+#     breaks every `hermes` command, kanban included).
+if [[ -d /etc/hermes ]]; then
+  _m="$(stat -c '%a' /etc/hermes)"
+  [[ "$_m" == "755" ]] && ok "Managed scope" "/etc/hermes mode 755 (secrets inside are 0600)" \
+                       || fail "Managed scope" "/etc/hermes mode $_m — must be 755 or every hermes command fails"
+fi
+
 # 5. WebUI / serve
 if systemctl is-active --quiet hermes-serve 2>/dev/null; then
   ok "WebUI" "hermes-serve active on 127.0.0.1:9119"
@@ -80,6 +103,27 @@ elif ss -lnt 2>/dev/null | grep -q ':9119 '; then
   warn "WebUI" "port 9119 listening but hermes-serve unit not active (manually started?)"
 else
   warn "WebUI" "not running — Android control plane unavailable"
+fi
+
+# 5b. agent bus dispatcher (the gateway hosts it; a dead dispatcher parks every
+#     task in "ready" forever with no error anywhere else)
+if systemctl is-active --quiet hermes-env-guard 2>/dev/null; then
+  ok "Env guard" "hermes-env-guard active (self-heals the shim secret)"
+else
+  fail "Env guard" "hermes-env-guard not active — secret self-heal disabled"
+fi
+if systemctl is-active --quiet hermes-gateway 2>/dev/null; then
+  # INFO-level gateway lines go to the log FILE, not journald (which only sees
+  # the startup warnings) — checking journald here produced a permanent false
+  # "no dispatcher tick" warning on a perfectly healthy dispatcher.
+  _gwlog="$HERMES_HOME/logs/gateway.log"
+  if [[ -r "$_gwlog" ]] && grep -q "kanban dispatcher: embedded" "$_gwlog"; then
+    ok "Dispatcher" "hermes-gateway active, embedded dispatcher ticking"
+  else
+    warn "Dispatcher" "gateway active but no dispatcher tick in 10min — check journalctl -u hermes-gateway"
+  fi
+else
+  fail "Dispatcher" "hermes-gateway not active — kanban tasks will never run"
 fi
 
 # 6. Agent bus (kanban board + profiles)

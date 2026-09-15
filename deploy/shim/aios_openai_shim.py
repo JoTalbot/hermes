@@ -70,7 +70,7 @@ BIND = os.environ.get("HERMES_SHIM_BIND", "127.0.0.1")
 PORT = int(os.environ.get("HERMES_SHIM_PORT", "9700"))
 TIMEOUT = float(os.environ.get("HERMES_SHIM_TIMEOUT", "120"))
 
-SHIM_VERSION = "1.2.0"
+SHIM_VERSION = "1.3.3"
 
 TIER_BY_MODEL = {
     "hermes-fast": "fast",
@@ -87,6 +87,22 @@ MAX_TOOLS_RENDERED = 40
 MAX_TOOL_DESC = 160
 MAX_STRING_IN_HISTORY = 6000
 
+# The AIOS balancer hands the provider only `prompt[:4000]`
+# (llm_balancer.OpenAICompatibleCloudProvider.generate). Everything we render past
+# that is invisible to the model, so the goal is assembled against an explicit
+# budget with the most important section first. See _render_goal for why the order
+# is not cosmetic.
+GOAL_BUDGET = 3900
+TOOLS_BUDGET = 1500
+
+# The balancer's last resort when every provider fails is a local "reasoning"
+# fallback that emits canned boilerplate ("AIOS Reasoner: <запрос> проанализирован
+# автономным ядром кластера…"). It is not an answer, and an agent that receives it
+# as if it were one derails: it "completes" cards with an empty result and burns the
+# provider pool retrying. We detect it, retry once, and otherwise fail loudly.
+FALLBACK_MARKERS = ("AIOS Reasoner:", "проанализирован автономным", "автономным ядром кластера")
+FALLBACK_PROVIDERS = ("emergency_engine", "autonomous_heuristic_engine", "local_autonomous")
+
 # ---------------------------------------------------------------- telemetry
 STATS = {
     "requests_total": 0,
@@ -99,6 +115,11 @@ STATS = {
     "tool_bridge_requests_total": 0,
     "tool_calls_emitted_total": 0,
     "tool_parse_fallbacks_total": 0,
+    "empty_reply_retries_total": 0,
+    "tool_block_degraded_total": 0,
+    "goal_budget_exhausted_total": 0,
+    "upstream_fallback_total": 0,
+    "upstream_short_circuit_total": 0,
 }
 
 
@@ -138,28 +159,24 @@ def flatten_upstream(data: dict) -> str:
 
 
 # ------------------------------------------------------------ tool bridging
-TOOL_PROTOCOL_HEADER = """[TOOL PROTOCOL — READ CAREFULLY]
-You can call functions. Reply with EXACTLY ONE JSON object and nothing else.
-No prose, no markdown fences, no commentary before or after.
-
-To call one or more functions:
-{"tool_calls":[{"name":"<function_name>","arguments":{<json object>}}]}
-
-To answer the user without calling a function:
-{"content":"<your full answer as a plain string>"}
-
-Rules:
-- "arguments" must be a JSON object matching the function's parameters.
-- Emit only function names from the list below; never invent one.
-- If you already have the answer, use the {"content":...} form.
-- Never wrap the JSON in ``` fences.
-
+TOOL_PROTOCOL_HEADER = """[TOOL PROTOCOL] Reply with EXACTLY ONE JSON object, nothing else.
+No prose, no markdown fences.
+Call a function: {"tool_calls":[{"name":"<fn>","arguments":{<json object>}}]}
+Answer directly: {"content":"<your full answer as a plain string>"}
+Emit only names from the list below; never invent one. If you already know the
+answer, use the {"content":...} form rather than calling a function.
 AVAILABLE FUNCTIONS:
 """
 
 
-def _render_tools(tools: list) -> str:
-    """Compact, deterministic rendering of OpenAI tool schemas for the prompt."""
+def _render_tools(tools: list, desc_limit: int = MAX_TOOL_DESC,
+                 arg_detail: bool = True) -> str:
+    """Compact, deterministic rendering of OpenAI tool schemas for the prompt.
+
+    `desc_limit=0` drops descriptions and `arg_detail=False` drops the argument
+    list — used by _build_tool_block to degrade gracefully instead of silently
+    making tools uncallable when the tool set is large.
+    """
     lines = []
     for i, t in enumerate(tools[:MAX_TOOLS_RENDERED]):
         if not isinstance(t, dict):
@@ -171,21 +188,51 @@ def _render_tools(tools: list) -> str:
         if not name:
             continue
         desc = (fn.get("description") or "").strip().replace("\n", " ")
-        if len(desc) > MAX_TOOL_DESC:
-            desc = desc[:MAX_TOOL_DESC] + "…"
-        params = fn.get("parameters") or {}
-        props = params.get("properties") or {}
-        required = set(params.get("required") or [])
-        arg_bits = []
-        for pname, pspec in list(props.items())[:25]:
-            ptype = (pspec or {}).get("type", "any") if isinstance(pspec, dict) else "any"
-            mark = "" if pname in required else "?"
-            arg_bits.append(f"{pname}{mark}:{ptype}")
-        sig = ", ".join(arg_bits)
-        lines.append(f"{i + 1}. {name}({sig}) — {desc}")
+        if desc_limit <= 0:
+            desc = ""
+        elif len(desc) > desc_limit:
+            desc = desc[:desc_limit] + "…"
+        sig = ""
+        if arg_detail:
+            params = fn.get("parameters") or {}
+            props = params.get("properties") or {}
+            required = set(params.get("required") or [])
+            arg_bits = []
+            for pname, pspec in list(props.items())[:25]:
+                ptype = (pspec or {}).get("type", "any") if isinstance(pspec, dict) else "any"
+                mark = "" if pname in required else "?"
+                arg_bits.append(f"{pname}{mark}:{ptype}")
+            sig = ", ".join(arg_bits)
+        lines.append(f"{i + 1}. {name}({sig}) — {desc}" if desc else f"{i + 1}. {name}({sig})")
     if len(tools) > MAX_TOOLS_RENDERED:
         lines.append(f"... ({len(tools) - MAX_TOOLS_RENDERED} more tools omitted)")
     return "\n".join(lines)
+
+
+def _build_tool_block(tools: list, budget: int = TOOLS_BUDGET) -> str:
+    """Header + function list, degraded as needed to fit `budget` characters.
+
+    A tool the model cannot see is a tool it cannot call, so a truncated list is a
+    correctness bug, not a formatting detail. We therefore try progressively
+    terser renderings and, only if even bare names do not fit, keep as many names
+    as the budget allows — always recording the degradation in /metrics.
+    """
+    for desc_limit, arg_detail in ((60, True), (0, True), (0, False)):
+        body = _render_tools(tools, desc_limit=desc_limit, arg_detail=arg_detail)
+        block = TOOL_PROTOCOL_HEADER + body
+        if len(block) <= budget:
+            if (desc_limit, arg_detail) != (60, True):
+                STATS["tool_block_degraded_total"] += 1
+            return block
+    STATS["tool_block_degraded_total"] += 1
+    names, used = [], len(TOOL_PROTOCOL_HEADER)
+    for t in tools[:MAX_TOOLS_RENDERED]:
+        fn = t.get("function") if isinstance(t, dict) and t.get("type") == "function" else t
+        nm = fn.get("name") if isinstance(fn, dict) else None
+        if nm and used + len(nm) + 2 <= budget:
+            names.append(nm)
+            used += len(nm) + 2
+    return TOOL_PROTOCOL_HEADER + ", ".join(names)
 
 
 def _extract_json_object(text: str) -> dict | None:
@@ -281,6 +328,11 @@ def _parse_model_reply(text: str, allowed: set[str]) -> tuple[list[dict], str | 
         c = obj.get("content")
         if isinstance(c, str) and c.strip():
             return [], c
+        # Well-formed protocol object with an empty content field. Distinct from
+        # "no JSON at all": this is the model saying nothing, and the caller
+        # treats it as a reason to re-ask rather than as an answer.
+        if "content" in obj:
+            return [], None
     return [], text
 
 
@@ -317,25 +369,125 @@ def _render_history_message(m) -> str:
     return "\n".join(out)
 
 
-def _render_goal(messages: list, system_extra=None, tool_block: str = "") -> str:
+def _clip(text: str, limit: int) -> str:
+    """Truncate to `limit` characters, marking that we did."""
+    text = text.strip()
+    if limit <= 0:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[: max(limit - 1, 0)].rstrip() + "…"
+
+
+def _render_goal(messages: list, system_extra=None, tool_block: str = "",
+                 budget: int = GOAL_BUDGET) -> str:
     """Flatten an OpenAI message list into the single `goal` string AIOS wants.
 
-    Deliberately lossy: AIOS /ask has no notion of multi-turn. We keep tool
-    results and the system prompt so Hermes still gets its context, but the
-    balancer sees one instruction. If your agents need true multi-turn with
-    provider-side history, front Hermes with a real OpenAI-compatible
-    provider instead of this shim (see docs/BALANCER.md "Known lossy path").
+    ORDER IS THE WHOLE POINT. The balancer forwards only the first ~4000 chars of
+    this string, so whatever comes last effectively does not exist. The naive
+    "system, tools, history" order spends the entire budget on tool schemas and the
+    model never sees the task: it answered a dispatched kanban task with
+    "Ready to assist. How can I help you today?" and, in the worker's own prompt,
+    {"content":""} — both observed on 2026-09-15 before this rewrite.
+
+    Sections, in priority order:
+        [task]    the latest user turn — what to do
+        [recent]  the few messages after it (tool results, prior tool calls)
+        [system]  the agent's operating contract — how to behave
+        [tools]   tool protocol + callable signatures — how to act
+        [earlier] older turns, newest first, only with leftover budget
     """
-    parts = []
-    if system_extra:
-        parts.append(f"[system] {system_extra}")
-    if tool_block:
-        parts.append(tool_block)
+    sys_msgs: list[str] = []
+    convo: list = []
     for m in messages:
+        if isinstance(m, dict) and m.get("role") == "system":
+            c = m.get("content")
+            if isinstance(c, list):
+                c = " ".join(p.get("text", "") for p in c
+                             if isinstance(p, dict) and p.get("type") == "text")
+            if c:
+                sys_msgs.append(str(c))
+        else:
+            convo.append(m)
+
+    task_idx = None
+    for i in range(len(convo) - 1, -1, -1):
+        if isinstance(convo[i], dict) and convo[i].get("role") == "user":
+            task_idx = i
+            break
+    if task_idx is None:
+        task_raw = _render_history_message(convo[-1]) if convo else ""
+        context_msgs, earlier_msgs = [], convo[:-1] if convo else []
+    else:
+        task_raw = _render_history_message(convo[task_idx])
+        context_msgs, earlier_msgs = convo[task_idx + 1:], convo[:task_idx]
+
+    if system_extra:
+        sys_msgs.insert(0, str(system_extra))
+
+    remaining = budget
+    parts: list[str] = []
+
+    def emit(label: str, body: str, cap: int) -> None:
+        nonlocal remaining
+        body = (body or "").strip()
+        room = min(cap, remaining - len(label) - 1)
+        if not body or room <= 20:
+            return
+        piece = f"{label} {_clip(body, room)}"
+        parts.append(piece)
+        remaining -= len(piece) + 1
+
+    emit("[task]", task_raw, 1100)
+    emit("[recent]", "\n".join(_render_history_message(m) for m in context_msgs[-3:]), 900)
+    emit("[system]", "\n".join(sys_msgs), 900)
+    emit("[tools]", tool_block, TOOLS_BUDGET)
+
+    history_lines: list[str] = []
+    for m in earlier_msgs[-12:]:
         chunk = _render_history_message(m)
         if chunk:
-            parts.append(chunk)
-    return "\n".join(parts).strip() or "(empty)"
+            history_lines.append(_clip(chunk, 400))
+    if history_lines:
+        emit("[earlier]", "\n".join(reversed(history_lines)), 600)
+
+    if not parts:
+        return "(empty)"
+    if remaining <= 0:
+        STATS["goal_budget_exhausted_total"] += 1
+    return "\n".join(parts)
+
+
+# ------------------------------------------------- upstream health (fallback)
+def _is_fallback(data: dict, text: str) -> bool:
+    """True when the balancer handed back its local boilerplate instead of a model."""
+    prov = str((data or {}).get("provider") or "").lower()
+    if any(p in prov for p in FALLBACK_PROVIDERS):
+        return True
+    head = (text or "").strip()[:160]
+    return any(marker in head for marker in FALLBACK_MARKERS)
+
+
+def _ask_balancer(payload: dict, attempts: int = 1) -> tuple[int, dict, str]:
+    """POST /ask, reporting the emergency fallback as a failure rather than an answer.
+
+    `attempts` defaults to 1 on purpose. The balancer already walks its whole
+    provider list before falling back, so a second call here is pure amplification:
+    it doubles the load on a pool that is, by definition, already failing. Extra
+    attempts are available for callers that genuinely need them (the /selfcheck
+    probe), but the request path does not.
+    """
+    last_code, last_data = 0, {}
+    for i in range(attempts):
+        code, data = _post_json("/api/v1/aios/ask", payload)
+        text = flatten_upstream(data) if code < 400 else ""
+        if code < 400 and not _is_fallback(data, text):
+            return code, data, text
+        last_code, last_data = code, data
+        STATS["upstream_fallback_total"] += 1
+        if i + 1 < attempts:
+            time.sleep(1.2 * (i + 1))
+    return last_code, last_data, ""
 
 
 # ---------------------------------------------------------- SSE re-emitter
@@ -422,6 +574,26 @@ class Handler(BaseHTTPRequestHandler):
             # Client hung up (Hermes cancel / mobile network drop). Not an error.
             pass
 
+    def _send_sse_error(self, err: dict) -> None:
+        """Deliver an error inside an SSE stream.
+
+        Hermes always streams, so a bare 5xx JSON body reaches it as an empty
+        stream ("Provider returned an empty stream with no finish_reason") and the
+        real cause is lost. Sending the error as an in-band SSE event keeps it.
+        """
+        payload = json.dumps(err, ensure_ascii=False).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+        frame = b"data: " + payload + b"\r\n\r\n"
+        try:
+            self.wfile.write(b"%X\r\n" % len(frame) + frame + b"\r\n")
+            self.wfile.write(b"0\r\n\r\n")
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
     def _authorized(self) -> bool:
         if ALLOW_ANON or not API_KEY:
             return True
@@ -430,6 +602,30 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- routes ----------------------------------------------------------
     def do_GET(self):
+        if self.path.startswith("/selfcheck"):
+            # End-to-end proof that the LLM path works, WITHOUT handing the caller
+            # the API key. Agents run as an unprivileged user that deliberately
+            # cannot read /etc/hermes/shim.env, yet they still need to answer "can
+            # I think right now?". The shim already holds the key, so the round trip
+            # happens here and only the verdict travels back.
+            probe = f"SHIM_SELFCHECK_{int(time.time())}"
+            ok, detail, provider = False, "", None
+            try:
+                code_r, data_r, text_r = _ask_balancer(
+                    {"goal": f"Reply with exactly: {probe}"}, attempts=2)
+                if code_r < 400 and text_r:
+                    provider = (data_r or {}).get("provider")
+                    ok = probe in text_r
+                    detail = text_r.strip()[:200]
+                else:
+                    detail = f"upstream {code_r}"
+            except Exception as exc:
+                detail = f"{type(exc).__name__}: {exc}"
+            return self._send(200 if ok else 503, {
+                "ok": ok, "probe": probe, "provider": provider,
+                "reply": detail, "version": SHIM_VERSION,
+            })
+
         if self.path in ("/health", "/"):
             n = max(STATS["requests_total"], 1)
             return self._send(200, {
@@ -456,6 +652,11 @@ class Handler(BaseHTTPRequestHandler):
                 f"llm_tool_bridge_requests_total {STATS['tool_bridge_requests_total']}",
                 f"llm_tool_calls_emitted_total {STATS['tool_calls_emitted_total']}",
                 f"llm_tool_parse_fallbacks_total {STATS['tool_parse_fallbacks_total']}",
+                f"llm_empty_reply_retries_total {STATS['empty_reply_retries_total']}",
+                f"llm_tool_block_degraded_total {STATS['tool_block_degraded_total']}",
+                f"llm_goal_budget_exhausted_total {STATS['goal_budget_exhausted_total']}",
+                f"llm_upstream_fallback_total {STATS['upstream_fallback_total']}",
+                f"llm_upstream_short_circuit_total {STATS['upstream_short_circuit_total']}",
             ]
             raw = ("\n".join(lines) + "\n").encode()
             self.send_response(200)
@@ -501,7 +702,7 @@ class Handler(BaseHTTPRequestHandler):
                 fn = t.get("function") if isinstance(t, dict) and t.get("type") == "function" else t
                 if isinstance(fn, dict) and fn.get("name"):
                     allowed_names.add(fn["name"])
-            tool_block = TOOL_PROTOCOL_HEADER + _render_tools(tools)
+            tool_block = _build_tool_block(tools)
 
         goal = _render_goal(
             messages,
@@ -520,10 +721,16 @@ class Handler(BaseHTTPRequestHandler):
             payload["json_mode"] = True
 
         t0 = time.monotonic()
-        code, data = _post_json("/api/v1/aios/ask", payload)
+        code, data, text = _ask_balancer(payload, attempts=2)
         latency = round((time.monotonic() - t0) * 1000, 1)
         STATS["last_latency_ms"] = latency
         STATS["latency_sum_ms"] += latency
+
+        if code < 400 and not text:
+            # The balancer answered with its local boilerplate, i.e. every provider
+            # failed. Surface that as an error: an agent handed boilerplate as if it
+            # were a completion will "finish" a task with nothing in it.
+            code, data = 503, {"error": "all upstream providers unavailable (emergency fallback)"}
 
         if code >= 400:
             STATS["requests_failed"] += 1
@@ -537,28 +744,35 @@ class Handler(BaseHTTPRequestHandler):
                 }
             }
             # A streaming client cannot read a JSON error body cleanly, so
-            # surface it as a single SSE error event when stream was requested.
+            # surface it as a single SSE event when a stream was requested.
             if stream:
-                payload_err = json.dumps(err, ensure_ascii=False).encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-                self.send_header("Cache-Control", "no-cache")
-                self.send_header("Transfer-Encoding", "chunked")
-                self.end_headers()
-                try:
-                    self.wfile.write(b"%X\r\n" % len(payload_err) + b"data: " + payload_err + b"\r\n\r\n")
-                    self.wfile.write(b"0\r\n\r\n")
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
-                return
+                return self._send_sse_error(err)
             return self._send(502, err)
 
         text = flatten_upstream(data)
         calls: list[dict] = []
         if tool_block:
             calls, content = _parse_model_reply(text, allowed_names)
-            if not calls and not content:
-                STATS["tool_parse_fallbacks_total"] += 1
+            if not calls and not (content or "").strip():
+                # Signature of a model that never saw the request: a well-formed but
+                # empty protocol object ({"content":""}). Re-ask once with nothing but
+                # the task and the tool list, which is the shape that reproduces best
+                # on the small fast-tier models the balancer prefers.
+                STATS["empty_reply_retries_total"] += 1
+                retry_goal = _render_goal(messages, None, tool_block=tool_block, budget=2200)
+                code2, data2, text2 = _ask_balancer(
+                    {"goal": retry_goal, "json_mode": True}, attempts=1)
+                if code2 < 400 and text2:
+                    calls2, content2 = _parse_model_reply(text2, allowed_names)
+                    if calls2 or (content2 or "").strip():
+                        calls, content, text = calls2, content2, text2
+                if not calls and not (content or "").strip():
+                    STATS["tool_parse_fallbacks_total"] += 1
+                    # Never return an empty assistant turn: the agent would
+                    # silently do nothing (and the kanban worker would exit
+                    # without completing its task).
+                    content = ('The language model returned an empty response. '
+                               'State what you know and name what is unverified.')
             STATS["tool_calls_emitted_total"] += len(calls)
         else:
             content = text

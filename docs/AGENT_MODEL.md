@@ -29,3 +29,48 @@ restarted or failing agent cannot cascade, and every handoff is auditable.
 
 Skills are capability, not permission: a skill in `skills/` that a role's allowlist forbids is
 unreachable, and nothing auto-escalates because a new skill appeared (§15).
+
+## Headless invariants
+
+These are properties of *this* deployment — nobody sits at an agent's terminal, so
+anything that assumes a human presence is a defect here.
+
+1. **`clarify` is disabled**, via `platform_toolsets` in the managed scope. A
+   dispatched worker cannot ask a question: it burned 120s per invocation and stalled
+   tasks twice before the tool was removed from the allowlist. Agents decide, state
+   the assumption in their result, and proceed. The same instruction is in
+   `config/SOUL.agent.md`; the config change makes it a property of the system
+   instead of a request to the model.
+2. **A run must end with `kanban_complete` or `kanban_block`.** Exiting cleanly
+   without either is a *protocol violation* and counts as a crash, no matter how much
+   useful work the run did. This is enforced by the dispatcher, not by convention.
+3. **Repeated self-blocking escalates.** Blocking twice with the same block kind
+   routes the task to a human instead of looping forever.
+4. **Retries are finite.** `failure_limit: 2` → a card that crashes twice is
+   auto-blocked (`gave_up`). Clear it with `kanban unblock` once the cause is fixed.
+5. **Concurrency is a cost control, not just a speed knob.** Four workers dispatched
+   at once exhausted the provider pool and every one of them failed. One task at a
+   time, verified, beats four in parallel and none finished.
+
+## Delegation semantics (async, via the board)
+
+The board is a queue, not an RPC channel. There is no "call agent B and wait" verb.
+The correct pattern:
+
+```bash
+# B's work item — no parents, so it runs now
+hermes kanban create "Report LLM balancer health" --assignee monitoring
+# A waits for it; A is promoted automatically when B completes
+hermes kanban link <B_id> <A_id>
+```
+
+`A` then sits in `todo` (not `blocked` — nobody has to intervene), and when `B`
+finishes the dispatcher promotes `A` to `ready`. `A` reads `B`'s result in its next
+run with `kanban_show <B_id>`.
+
+Do **not** write a task body that says "wait for the result" — a worker cannot wait.
+Observed: an orchestrator asked to "wait for/read its result" created the same card
+four times and then added a comment asking for clarification, which no human answered.
+
+Adding a **comment** with the dependency's ID is worth it: small models read the
+comment stream more reliably than they infer relationships from parent links.

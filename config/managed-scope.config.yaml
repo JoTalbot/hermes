@@ -1,0 +1,47 @@
+# Hermes MANAGED SCOPE — IT-pushed, wins over each profile's own config.yaml.
+#
+# WHY THIS FILE EXISTS
+#   A named Hermes profile does NOT inherit the machine-level ~/.hermes/config.yaml
+#   ("config.yaml not found (using defaults)" in `hermes -p <name> doctor`). With
+#   27 agent profiles, copying the model block into each one means 27 copies that
+#   drift. The managed scope (hermes_cli/managed_scope.py) is the one place that
+#   every profile — and the machine default — reads before its own config.
+#
+# Endpoint: Hermes -> 127.0.0.1:9700 (OpenAI-compat shim) -> Octopus AIOS LLM
+# balancer 127.0.0.1:9600 (11 providers / 5 tiers, weighted + health-gated).
+#
+# NO secret material here. ${HERMES_BALANCER_API_KEY} is expanded by Hermes at
+# load time from the process environment, which systemd supplies from
+# /etc/hermes/shim.env (0600 root:root, not readable by the agent user).
+# This file is safe to commit.
+model:
+  provider: custom
+  default: hermes-auto
+  base_url: http://127.0.0.1:9700/v1
+  api_key: ${HERMES_BALANCER_API_KEY}
+
+# Headless agent OS allowlist — NO `clarify`.
+# Nobody sits at these terminals, so a `clarify` call can never be answered: it
+# burns 120s per invocation and stalls every dispatched kanban task (observed
+# twice on 2026-09-15, once for 2m11s). Agents must decide, state the assumption
+# and proceed, which is what config/SOUL.agent.md instructs. Expressed as an
+# allowlist because that is the key Hermes' own `hermes tools disable` writes,
+# and the managed scope makes it hold for all 27 profiles at once.
+platform_toolsets:
+  cli:
+    - browser
+    - code_execution
+    - computer_use
+    - cronjob
+    - delegation
+    - file
+    - image_gen
+    - kanban
+    - memory
+    - session_search
+    - skills
+    - terminal
+    - todo
+    - tts
+    - vision
+    - web

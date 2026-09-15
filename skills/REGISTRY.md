@@ -35,7 +35,11 @@ approval store.
 | `gen-project-agents` | project profiles from measured data | repo | TSV | `config/agents/projects/*.yaml` | write repo | 1.0.0 | 2026-09-15 |
 | `backup` | verified config/state snapshots | Hermes layer | env | tar.gz + integrity result | reads state, writes `state/backups` | 1.0.0 | 2026-09-15 |
 | `register-server` | mint/reuse stable `srv-*` id + manifest | node | hostname | `config/servers/<host>.yaml` | write repo | 1.0.0 | 2026-09-15 |
-| `aios-openai-shim` | translate chat-completions → `goal` | inference | OpenAI request | OpenAI response | loopback net | 1.0.0 | 2026-09-15 |
+| `report-balancer-health` | one-line LLM-path verdict (shim, pool, live round trip) | inference | env | `UP/DOWN` lines + exit 0/1/2 | read-only | 1.0.0 | 2026-09-15 |
+| `hermes-metrics-exporter` | Prometheus target for the Hermes layer | whole node | — | `/metrics` on 127.0.0.1:9725 | read-only, unprivileged | 1.0.0 | 2026-09-15 |
+| `seed-memory` | fold the tagged knowledge base into each profile's `memories/MEMORY.md` | all profiles | repo | 28 memory files | writes `$HERMES_HOME` | 1.0.0 | 2026-09-15 |
+| `apply-agent-soul` | propagate the shared operating contract to every profile | all profiles | `config/SOUL.agent.md` | 28 `SOUL.md` | writes profiles | 1.0.0 | 2026-09-15 |
+| `aios-openai-shim` | translate chat-completions → `goal` | inference | OpenAI request | OpenAI response | loopback net | **1.3.3** | 2026-09-15 |
 
 ## Pending proposals (from real repeated work, §15)
 
