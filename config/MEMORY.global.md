@@ -95,7 +95,24 @@ agent (profile)
   `profile create` copies whatever exists at creation time, so `scripts/apply-agent-soul.sh` must
   be re-run after adding a profile.
 - **LESSON** Without an explicit autonomy clause, a dispatched task stalls on a `clarify` call
-  that nobody can answer. Observed: 120 s lost to a question the model asked itself.
+  that nobody can answer. Observed: 120 s lost to a question the model asked itself. `clarify`
+  is now removed from the tool allowlist in the managed scope, so this cannot recur.
+- **FACT** Delegation is **asynchronous and one-way by default**. There is no "call agent B and
+  wait for its reply" verb. A worker that ends its run has ended it. Request/reply across agents
+  means: the requester creates a card for the specialist and either completes its own card
+  saying what it delegated, or makes its own card depend on the specialist's
+  (`hermes kanban link <specialist_id> <mine>`), which parks it in `todo` until the specialist
+  finishes, then auto-promotes it.
+- **LESSON** A worker cannot wait, and telling a small model to try produces a loop. A card whose
+  body said "wait for/read its result" resulted in the *same* sub-task being created **16 times**,
+  all running at once, all competing for the same provider quota. The fix is structural, not
+  rhetorical: `hermes kanban create ... --idempotency-key <stable-slug>`. Verified — a second
+  create with the same key returns the first task's id instead of creating another. Any
+  delegation from an agent must carry one.
+- **OBSERVATION** Concurrency is a cost control here, not just a speed knob. Four workers running
+  at once exhausted the provider pool and every one of them failed; a single card, verified,
+  finished. The dispatcher spawns at most one worker per 60 s tick — the storms come from agents
+  fanning out, not from the dispatcher.
 
 ## 6. Hard rules for anything that writes
 

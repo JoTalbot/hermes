@@ -70,7 +70,7 @@ BIND = os.environ.get("HERMES_SHIM_BIND", "127.0.0.1")
 PORT = int(os.environ.get("HERMES_SHIM_PORT", "9700"))
 TIMEOUT = float(os.environ.get("HERMES_SHIM_TIMEOUT", "120"))
 
-SHIM_VERSION = "1.3.3"
+SHIM_VERSION = "1.3.5"
 
 TIER_BY_MODEL = {
     "hermes-fast": "fast",
@@ -93,7 +93,10 @@ MAX_STRING_IN_HISTORY = 6000
 # budget with the most important section first. See _render_goal for why the order
 # is not cosmetic.
 GOAL_BUDGET = 3900
-TOOLS_BUDGET = 1500
+TOOLS_BUDGET = 1300
+# A card read back with kanban_show is ~1.8 KB, mostly the Body and the completion
+# summary. Anything smaller than that silently hides the answer.
+RECENT_BUDGET = 2600
 
 # The balancer's last resort when every provider fails is a local "reasoning"
 # fallback that emits canned boilerplate ("AIOS Reasoner: <запрос> проанализирован
@@ -381,21 +384,30 @@ def _clip(text: str, limit: int) -> str:
 
 def _render_goal(messages: list, system_extra=None, tool_block: str = "",
                  budget: int = GOAL_BUDGET) -> str:
-    """Flatten an OpenAI message list into the single `goal` string AIOS wants.
+    """Flatten the OpenAI message list into the one `goal` string AIOS wants.
 
-    ORDER IS THE WHOLE POINT. The balancer forwards only the first ~4000 chars of
-    this string, so whatever comes last effectively does not exist. The naive
-    "system, tools, history" order spends the entire budget on tool schemas and the
-    model never sees the task: it answered a dispatched kanban task with
-    "Ready to assist. How can I help you today?" and, in the worker's own prompt,
-    {"content":""} — both observed on 2026-09-15 before this rewrite.
+    ORDER AND BUDGET BOTH MATTER. The balancer forwards only the first ~4000 chars
+    of this string, so everything the model is allowed to see has to fit inside
+    `budget`, and the sections have to be sized according to what the agent needs.
 
-    Sections, in priority order:
+    The first version of this gave each section a fixed cap. Measured on a real
+    kanban worker request (system 6704 chars, user 61 chars, 17 tools) that wasted
+    ~40% of the budget: the task line is tiny, so the caps left 1670 characters
+    unused while still cutting the system prompt — which is where the agent's
+    "call kanban_complete or the run counts as failed" contract lives. Fixed caps on
+    variable-length inputs are just a different way to lose the important part.
+
+    Sections, in priority order, each with a floor and a ceiling:
         [task]    the latest user turn — what to do
-        [recent]  the few messages after it (tool results, prior tool calls)
-        [system]  the agent's operating contract — how to behave
+        [system]  operating contract / worker protocol — how to behave
         [tools]   tool protocol + callable signatures — how to act
-        [earlier] older turns, newest first, only with leftover budget
+        [recent]  messages after the task (tool results, prior tool calls)
+        [earlier] older turns, newest first
+
+    Floors are guaranteed for the first three; whatever is left after that is
+    shared out in proportion to how much each section still wants, so no budget is
+    wasted on a section that has nothing to say. Output order is task-first as a
+    safety margin, though nothing should be truncated once the total fits.
     """
     sys_msgs: list[str] = []
     convo: list = []
@@ -425,42 +437,95 @@ def _render_goal(messages: list, system_extra=None, tool_block: str = "",
     if system_extra:
         sys_msgs.insert(0, str(system_extra))
 
-    remaining = budget
-    parts: list[str] = []
+    history = [_clip(_render_history_message(m), 400)
+               for m in earlier_msgs[-12:]]
+    history = [h for h in history if h]
 
-    def emit(label: str, body: str, cap: int) -> None:
-        nonlocal remaining
-        body = (body or "").strip()
-        room = min(cap, remaining - len(label) - 1)
-        if not body or room <= 20:
-            return
-        piece = f"{label} {_clip(body, room)}"
-        parts.append(piece)
-        remaining -= len(piece) + 1
-
-    emit("[task]", task_raw, 1100)
-    emit("[recent]", "\n".join(_render_history_message(m) for m in context_msgs[-3:]), 900)
-    emit("[system]", "\n".join(sys_msgs), 900)
-    emit("[tools]", tool_block, TOOLS_BUDGET)
-
-    history_lines: list[str] = []
-    for m in earlier_msgs[-12:]:
+    # [recent] holds tool results, and a tool result is the agent's working
+    # memory: the card it just read, the command output it is about to report.
+    # Rendered the obvious way — join then clip — the NEWEST message is cut first
+    # and the agent loops, calling the same tool again with the same invisible
+    # answer (observed: 46 consecutive kanban_show calls, 90-turn budget spent).
+    # So it is sized by what the payload actually is (~1.8 KB for a card with a
+    # completion summary) and the newest message is placed FIRST with its own
+    # allocation, not merely at the end of a shared string.
+    recent_parts: list[str] = []
+    recent_room = RECENT_BUDGET
+    for m in reversed(context_msgs[-4:]):
         chunk = _render_history_message(m)
-        if chunk:
-            history_lines.append(_clip(chunk, 400))
-    if history_lines:
-        emit("[earlier]", "\n".join(reversed(history_lines)), 600)
+        if not chunk:
+            continue
+        allow = min(len(chunk), recent_room)
+        if allow <= 20:
+            break
+        recent_parts.append(_clip(chunk, allow))
+        recent_room -= len(recent_parts[-1]) + 1
+    recent_body = "\n".join(reversed(recent_parts))
+
+    # (label, body, floor, ceiling) in priority order
+    specs = [
+        ("[task]", task_raw,
+         120, 700),
+        ("[recent]", recent_body,
+         900, 2600),
+        ("[system]", "\n".join(sys_msgs),
+         700, 1500),
+        ("[tools]", tool_block,
+         500, 1300),
+        ("[earlier]", "\n".join(reversed(history)) if history else "",
+         0, 300),
+    ]
+
+    # Reserve room for the "[label] " prefixes we are about to prepend.
+    inner = budget - sum(len(lbl) + 1 for lbl, body, _f, _c in specs if (body or "").strip())
+    if inner < 200:  # pathological caller: fall back to one bare section
+        return _clip(task_raw or "\n".join(sys_msgs) or "(empty)", max(budget, 200))
+
+    grants: list[int] = []
+    remaining = inner
+    for lbl, body, floor, ceil in specs:
+        want = min(len((body or "").strip()), ceil)
+        give = min(floor, want, remaining)
+        grants.append(give)
+        remaining -= give
+
+    needs = [min(len((b or "").strip()), c) - g for (_l, b, _f, c), g in zip(specs, grants)]
+    total_need = sum(max(n, 0) for n in needs)
+    if total_need > 0 and remaining > 0:
+        for i, need in enumerate(needs):
+            if need <= 0:
+                continue
+            extra = min(need, int(remaining * need / total_need))
+            grants[i] += extra
+
+    parts: list[str] = []
+    for (lbl, body, _f, _c), grant in zip(specs, grants):
+        body = (body or "").strip()
+        if not body or grant <= 0:
+            continue
+        parts.append(f"{lbl} {_clip(body, grant)}")
 
     if not parts:
         return "(empty)"
-    if remaining <= 0:
+    out = "\n".join(parts)
+    if len(out) > budget:
+        # Should not happen; if it ever does, the task section must survive.
+        out = _clip(out, budget)
+    if len(out) >= budget - 20:
         STATS["goal_budget_exhausted_total"] += 1
-    return "\n".join(parts)
+    return out
 
 
 # ------------------------------------------------- upstream health (fallback)
 def _is_fallback(data: dict, text: str) -> bool:
-    """True when the balancer handed back its local boilerplate instead of a model."""
+    """True when the balancer handed back its local boilerplate instead of a model.
+
+    When every provider fails, the balancer's last resort is
+    LocalAutonomousReasoningFallback, which answers with
+    "AIOS Reasoner: <запрос> проанализирован автономным ядром кластера…" and
+    reports status: success. Treated as a completion, that makes an agent finish a
+    task with no content — observed as cards completing with an empty result.
+    """
     prov = str((data or {}).get("provider") or "").lower()
     if any(p in prov for p in FALLBACK_PROVIDERS):
         return True
@@ -472,13 +537,15 @@ def _ask_balancer(payload: dict, attempts: int = 1) -> tuple[int, dict, str]:
     """POST /ask, reporting the emergency fallback as a failure rather than an answer.
 
     `attempts` defaults to 1 on purpose. The balancer already walks its whole
-    provider list before falling back, so a second call here is pure amplification:
-    it doubles the load on a pool that is, by definition, already failing. Extra
-    attempts are available for callers that genuinely need them (the /selfcheck
-    probe), but the request path does not.
+    provider list before falling back, so a second call here is pure amplification
+    against a pool that is, by definition, already failing. Extra attempts are
+    available to callers that genuinely need them (the /selfcheck probe); the
+    request path does not use them.
+
+    Returns (status_code, upstream_json, extracted_text).
     """
     last_code, last_data = 0, {}
-    for i in range(attempts):
+    for i in range(max(attempts, 1)):
         code, data = _post_json("/api/v1/aios/ask", payload)
         text = flatten_upstream(data) if code < 400 else ""
         if code < 400 and not _is_fallback(data, text):
@@ -721,7 +788,7 @@ class Handler(BaseHTTPRequestHandler):
             payload["json_mode"] = True
 
         t0 = time.monotonic()
-        code, data, text = _ask_balancer(payload, attempts=2)
+        code, data, text = _ask_balancer(payload)  # one shot; see _ask_balancer
         latency = round((time.monotonic() - t0) * 1000, 1)
         STATS["last_latency_ms"] = latency
         STATS["latency_sum_ms"] += latency
