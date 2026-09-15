@@ -73,7 +73,16 @@ printf 'slug\tpath\tbranch\torigin\tdirty\tlang\tgit_ok\nfoo\t/opt/foo\tmain\tfo
 ck "refuses duplicate slugs" "duplicate slugs" "$(bash scripts/gen-project-agents.sh "$t" 2>&1)"
 rm -f "$t"
 echo "[7] doctor.sh is well-formed and dry-runnable"
-ck "doctor covers all 12 gate areas" "12" "$(grep -cE '^# [0-9]+\.' scripts/doctor.sh)"
+# Was a magic constant ("12"), which broke the moment a gate was ADDED — a test that
+# fails on improvement teaches people to ignore it. Assert the property instead:
+# enough gates, numbered contiguously from 1, and the ones we care about present.
+sections=$(grep -cE '^# [0-9]+\.' scripts/doctor.sh)
+ck "doctor has at least 12 gate areas" "yes" "$( (( sections >= 12 )) && echo yes || echo "no: $sections" )"
+nums=$(grep -oE '^# [0-9]+\.' scripts/doctor.sh | sed 's/^# //; s/\.$//' || true)
+maxn=$(printf '%s\n' $nums | sort -n | tail -1)
+uniqn=$(printf '%s\n' $nums | sort -nu | wc -l)
+ck "doctor gate numbers contiguous 1..N" "yes" "$( [[ "$maxn" == "$uniqn" ]] && echo yes || echo "gap: max=$maxn unique=$uniqn" )"
+ck "doctor covers the backup gate" "yes" "$( grep -qE '^# 13\. Backups' scripts/doctor.sh && echo yes || echo no )"
 ck "doctor verdict strings present" "SYSTEM HEALTH: HEALTHY" "$(grep -o 'SYSTEM HEALTH: HEALTHY' scripts/doctor.sh)"
 ck "secret scan clean on repo" "clean" "$(bash scripts/secret-scan.sh --worktree)"
 echo
