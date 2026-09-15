@@ -125,29 +125,59 @@ agent (profile)
 - **DECISION** Secrets are referenced by name (`${VAR}` in config, `EnvironmentFile=` in units),
   never inlined. That is what makes this repo safe to publish.
 
-## 7. Remote access (Android / tailnet)
+## 7. Remote access (Android / direct public port)
 
-- **FACT** The server is in the tailnet as `arm-server-01`, IPv4 **100.109.170.74**, MagicDNS
-  `arm-server-01.tail5261f7.ts.net`, `tailscaled` active, UFW allows 41641/udp.
-- **FACT** The dashboard binds `127.0.0.1:9119` only. Access from the phone is an SSH forward to the
-  **tailnet** IP: `ssh -L 9119:127.0.0.1:9119 ubuntu@100.109.170.74`, then `http://127.0.0.1:9119` on
-  the phone. Verified: `/`, `/healthz`, `/api/status` all return 200 through the forward.
-- **FACT** You cannot simply open `http://100.109.170.74:9119`. The dashboard validates the Host
-  header and accepts only the interface it bound to (`localhost`/`127.0.0.1`/`::1` on a loopback bind);
-  anything else gets `400 Invalid Host header`. That is DNS-rebinding protection (GHSA-ppp5-vxwm-4cf7).
-- **FACT** `tailscale serve` cannot bridge it: it preserves the incoming Host, so the dashboard still
-  refuses (measured: 400 via MagicDNS, 404 via IP). Do not spend time on it.
-- **FACT** HTTPS certificates are unavailable to this tailnet account —
-  `tailscale cert … → 500 your Tailscale account does not support getting TLS certs`. So there is no
-  trusted `https://…ts.net` URL to hand a browser.
+- **FACT** The dashboard now binds **`0.0.0.0:9119`** and is reached **directly**:
+  `http://129.213.177.56:9119/` → password login. Owner decision 2026-09-15 (`plain_port`: no
+  Tailscale on the phone, no TLS).
+- **FACT** It is protected by the bundled `basic` dashboard-auth provider, enabled with
+  `hermes plugins enable basic`. Credentials live in `/etc/hermes/dashboard.env` (0600 root,
+  `USERNAME` / `PASSWORD_HASH` / `SECRET`) with a plaintext copy in
+  `/etc/hermes/dashboard.password` (0600 root). Session TTL 43200 s = 12 h; `SECRET` is set, so a
+  service restart does not invalidate live sessions.
+- **FACT** Verified from the public internet on 2026-09-15 (not from loopback): 6/6 external
+  probe nodes see the port open; `/` → `302 /login?next=%2F`; `/login` → `200` "Sign in — Hermes
+  Agent"; `POST /auth/password-login` with the real password → `200 {"ok":true,"next":"/"}`;
+  `/api/sessions` → `401` unauthenticated and `200` with the session cookie; wrong password →
+  `401`. `/api/status` stays public — it is an intentional liveness probe with no secrets.
+- **FACT (cost us an hour — two firewalls, and the cloud one is authoritative)** ufw is the *inner*
+  firewall. OCI filters ingress at the VCN security list *before* the packet reaches the host, so a
+  perfect ufw rule and an unfiltered bind still leave the port dead. The list permitted only
+  22, 80, 443, 8080, 5434, ICMP; six independent external nodes confirmed everything else was
+  filtered while `ufw` already said `ALLOW 9119`. Fix: `sudo bash scripts/oci-open-port.sh 9119`
+  (backup + clone-the-SSH-rule + verify-no-rule-lost; the OCI API has no append — `update` replaces
+  the whole ingress set, so a bad payload can lock you out). Inspect with
+  `bash scripts/oci-firewall.sh inspect`.
+- **FACT** The OCI CLI is at `/home/ubuntu/oci-venv/bin/oci`, region `iad`. Use
+  **`/root/.oci/config`** — it belongs to this instance's tenancy. `/home/ubuntu/.oci/config` is a
+  *different* tenancy and returns `NotAuthenticated` / 401 for this instance. A credential that
+  authenticates fine (`oci iam region list`) can still be the wrong one for the box.
+- **RISK (accepted, but real)** Transport is **plain HTTP**: the password crosses the network in
+  clear text and can be captured on the path. Treat it as a low-value credential, rotate it with
+  `scripts/enable-dashboard-auth.sh` if it leaks, and prefer the tunnel on untrusted networks.
+  `/auth/password-login` is rate-limited per IP (429) and logs failures.
+- **FACT** Rotating credentials invalidates every existing session and requires
+  `sudo systemctl restart hermes-serve`.
+- **FACT** You still cannot reach the dashboard by a *hostname* that is not the bound interface:
+  Host validation accepts only `localhost` / `127.0.0.1` / `::1` on a loopback bind, and on a
+  wildcard bind the request must arrive by IP. `400 Invalid Host header` is DNS-rebinding
+  protection (GHSA-ppp5-vxwm-4cf7), not a bug.
+- **FACT** `tailscale serve` cannot bridge it: it preserves the incoming Host, so the dashboard
+  refuses (measured: 400 via MagicDNS, 404 via IP); `--https=443` hangs (>300 s); and the tailnet
+  account cannot get TLS certs (`tailscale cert → 500`). Do not spend time on it.
 - **FACT** Ports 80/443 are held by the **production nginx** (`api.autosklo.org.ua`). Never bind,
   proxy or reconfigure anything on those ports.
-- **DECISION** Non-loopback binds of the dashboard are not used: since the June 2026 hardening any
-  non-loopback bind requires an auth provider (password or Nous OAuth), and CGNAT space — which is
-  exactly where Tailscale lives — is classified as public on purpose. `--insecure` is a no-op.
-  Convenience is not worth a second credential; the tunnel costs nothing.
+- **DECISION** Route 2 is kept as a fallback for locked-down networks:
+  `ssh -L 9119:127.0.0.1:9119 ubuntu@100.109.170.74` then `http://127.0.0.1:9119` on the phone.
+  When routing through the tunnel, use the **tailnet** IP so the SSH session itself is inside
+  WireGuard.
+- **LESSON** A test is only as good as its vantage point. Loopback tests passed while the service
+  was unreachable from the internet, and this agent's own sandbox egress goes through an HTTP proxy
+  (it "reaches" every port, including ones that are actually filtered) — so external reachability
+  had to be established with third-party probe nodes, with a known-open port as a control.
 
-## 7. Known-broken or known-open (do not re-discover, do not "fix" blind)
+
+## 8. Known-broken or known-open (do not re-discover, do not "fix" blind)
 
 - **FACT** `logistics-recurring-demand-scheduler-1` container is `Exited (1)`. Pre-existing, not
   Hermes-owned. Needs an owner decision.

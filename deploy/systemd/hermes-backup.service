@@ -1,0 +1,25 @@
+# Nightly Hermes state backup + restore verification.
+#
+# WHY a unit and not a cron line: the box already has two cron entries that point
+# at things that no longer exist (a dead acme.sh, a removed unit) and nobody
+# noticed for weeks. A unit is visible in `systemctl status`, carries the exact
+# environment it needs, and can fail loudly in the journal.
+#
+# HERMES_HOME is set explicitly — running backup.sh without it is the bug that
+# produced a "verified" backup of the wrong directory on 2026-09-15.
+[Unit]
+Description=Hermes state backup + restore verification
+Documentation=file:///opt/hermes/docs/RUNBOOK.md
+After=local-fs.target
+
+[Service]
+Type=oneshot
+Environment=HERMES_HOME=/home/hermes/.hermes
+Environment=HERMES_BACKUP_DIR=/var/backups/hermes
+Environment=HERMES_BACKUP_KEEP=7
+ExecStart=/bin/bash /opt/hermes/scripts/backup.sh
+# Second step: prove the archive just written is actually restorable. If this
+# fails the unit goes red, which is the point.
+ExecStartPost=/bin/bash /opt/hermes/scripts/verify-backup.sh
+Nice=10
+IOSchedulingClass=idle

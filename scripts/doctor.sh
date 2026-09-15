@@ -97,8 +97,26 @@ if [[ -d /etc/hermes ]]; then
 fi
 
 # 5. WebUI / serve
+# Report the bind the process ACTUALLY has, not the bind it used to have. The
+# dashboard moved from loopback to 0.0.0.0:9119 on 2026-09-15 (owner decision,
+# plain_port) and a doctor that keeps printing "127.0.0.1" would hide a regression
+# in whichever direction — including an accidental wide bind with no auth in front.
 if systemctl is-active --quiet hermes-serve 2>/dev/null; then
-  ok "WebUI" "hermes-serve active on 127.0.0.1:9119"
+  bind=$(ss -lntH 2>/dev/null | awk '$4 ~ /:9119$/ {print $4}' | head -1)
+  case "$bind" in
+    "127.0.0.1:9119"|"[::1]:9119")
+      ok "WebUI" "hermes-serve active on $bind (loopback only)" ;;
+    "0.0.0.0:9119"|"*:9119"|"[::]:9119")
+      if [[ -f /etc/hermes/dashboard.env ]]; then
+        ok "WebUI" "hermes-serve active on $bind, password-gated (basic auth provider)"
+      else
+        fail "WebUI" "listening on $bind WITHOUT /etc/hermes/dashboard.env — unauthenticated exposure"
+      fi ;;
+    "")
+      warn "WebUI" "hermes-serve active but nothing is listening on 9119" ;;
+    *)
+      warn "WebUI" "hermes-serve active on unexpected bind $bind" ;;
+  esac
 elif ss -lnt 2>/dev/null | grep -q ':9119 '; then
   warn "WebUI" "port 9119 listening but hermes-serve unit not active (manually started?)"
 else
@@ -192,6 +210,27 @@ if command -v tailscale >/dev/null 2>&1; then
 else
   warn "Tailscale" "absent — Android→GUI path falls back to SSH tunnel (see docs/RUNBOOK.md)"
 fi
+
+# 13. Backups — is the nightly archive actually being produced?
+# Added with hermes-backup.timer on 2026-09-15: before this, backups were manual and
+# there was no way to notice they had stopped. Age matters more than existence.
+BACKUP_DIR="${HERMES_BACKUP_DIR:-/var/backups/hermes}"
+if [[ -d "$BACKUP_DIR" && -r "$BACKUP_DIR" ]]; then
+  newest=$(ls -1t "$BACKUP_DIR"/hermes-state-*.tar.gz 2>/dev/null | head -1)
+  if [[ -z "$newest" ]]; then
+    warn "Backup" "no state archive in $BACKUP_DIR — has hermes-backup.timer ever run?"
+  else
+    age_h=$(( ( $(date +%s) - $(stat -c %Y "$newest") ) / 3600 ))
+    if   (( age_h > 168 )); then fail "Backup" "newest archive is ${age_h}h old (>7d) — backups are not running"
+    elif (( age_h > 48  )); then warn "Backup" "newest archive is ${age_h}h old — timer may be stuck"
+    else ok "Backup" "$(basename "$newest") — ${age_h}h old"; fi
+  fi
+  perm=$(stat -c %a "$BACKUP_DIR")
+  [[ "$perm" == "700" ]] && ok "BackupPerm" "$BACKUP_DIR is 0700" || warn "BackupPerm" "$BACKUP_DIR is $perm, expected 700"
+else
+  warn "Backup" "$BACKUP_DIR unreadable or absent (run the doctor as root)"
+fi
+
 
 echo
 if (( CRIT > 0 )); then
