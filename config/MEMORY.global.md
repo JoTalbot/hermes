@@ -125,6 +125,28 @@ agent (profile)
 - **DECISION** Secrets are referenced by name (`${VAR}` in config, `EnvironmentFile=` in units),
   never inlined. That is what makes this repo safe to publish.
 
+## 7. Remote access (Android / tailnet)
+
+- **FACT** The server is in the tailnet as `arm-server-01`, IPv4 **100.109.170.74**, MagicDNS
+  `arm-server-01.tail5261f7.ts.net`, `tailscaled` active, UFW allows 41641/udp.
+- **FACT** The dashboard binds `127.0.0.1:9119` only. Access from the phone is an SSH forward to the
+  **tailnet** IP: `ssh -L 9119:127.0.0.1:9119 ubuntu@100.109.170.74`, then `http://127.0.0.1:9119` on
+  the phone. Verified: `/`, `/healthz`, `/api/status` all return 200 through the forward.
+- **FACT** You cannot simply open `http://100.109.170.74:9119`. The dashboard validates the Host
+  header and accepts only the interface it bound to (`localhost`/`127.0.0.1`/`::1` on a loopback bind);
+  anything else gets `400 Invalid Host header`. That is DNS-rebinding protection (GHSA-ppp5-vxwm-4cf7).
+- **FACT** `tailscale serve` cannot bridge it: it preserves the incoming Host, so the dashboard still
+  refuses (measured: 400 via MagicDNS, 404 via IP). Do not spend time on it.
+- **FACT** HTTPS certificates are unavailable to this tailnet account —
+  `tailscale cert … → 500 your Tailscale account does not support getting TLS certs`. So there is no
+  trusted `https://…ts.net` URL to hand a browser.
+- **FACT** Ports 80/443 are held by the **production nginx** (`api.autosklo.org.ua`). Never bind,
+  proxy or reconfigure anything on those ports.
+- **DECISION** Non-loopback binds of the dashboard are not used: since the June 2026 hardening any
+  non-loopback bind requires an auth provider (password or Nous OAuth), and CGNAT space — which is
+  exactly where Tailscale lives — is classified as public on purpose. `--insecure` is a no-op.
+  Convenience is not worth a second credential; the tunnel costs nothing.
+
 ## 7. Known-broken or known-open (do not re-discover, do not "fix" blind)
 
 - **FACT** `logistics-recurring-demand-scheduler-1` container is `Exited (1)`. Pre-existing, not
