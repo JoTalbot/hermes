@@ -33,11 +33,11 @@ definition of done → this report)
 | 19 | **Existing projects** | **PASS** | no project was modified: projects are only read (git status, path existence, service/container state). The one exited container (`logistics-recurring-demand-scheduler-1`) and the 198 unpulled commits in `/opt/logistics` are reported as observations, not "fixed" |
 | 20 | **Clean server / discovery** | **PASS** | a node needs only the repo URL and `NATS_TOKEN`; it picks up agents, skills and configuration from Git, registers a stable `server_id`, announces itself on `#server`, and is then addressable as `node-arm-0X/<role>` |
 
-**Doctor at close of work:** `SYSTEM HEALTH: DEGRADED (1 warning)` — the single warning is the
-pre-existing exited container listed under "Remaining issues" (another team's project). Every
-Hermes gate is `[OK]`: bus transport / token / bridge / stream, federation (3 nodes, 2 peers),
-gateway pin, agent liveness, inference round trip, Telegram inbox (gate 18), GitHub (clean
-tree, 0 unpushed).
+**Doctor at close of work:** `SYSTEM HEALTH: DEGRADED (2 warnings)` — both belong to other
+projects: the exited container and the load-based SLO checker described under "Remaining
+issues". Every Hermes gate is `[OK]`: bus transport / token / bridge / stream, federation
+(3 nodes, 2 peers), gateway pin, agent liveness, inference round trip, Telegram inbox
+(gate 18), GitHub (clean tree, 0 unpushed). Hermes' own CPU footprint is 2.0 % of the box.
 
 ---
 
@@ -82,6 +82,13 @@ tree, 0 unpushed).
 * **Peer nodes are containers**, not separate physical hosts. The federation path is identical (`bootstrap.sh`), but a real second box would also exercise host-specific networking.
 * **`/opt/logistics` is 198 commits behind its upstream** — reported, untouched.
 * **One exotic container is exited** (`logistics-recurring-demand-scheduler-1`) — pre-existing, belongs to another project.
+* **`octopus-slo-checker.service` reports 14/15 and exits 1**, on the single check
+  `load_1m_lt_2x_vcpu`. Measured cause: another project's browser automation, not Hermes —
+  at the same moment `chromium`/`playwright` processes were consuming **183.8 %** CPU while
+  every Hermes process together (nats, bridge, inbox, agents, gateway, dashboard, shim,
+  exporter) used **2.0 %**. The unit fires every 5 minutes and fails while that workload runs.
+  Left untouched (it is another team's service, and its verdict is factually correct), but it
+  is the reason `doctor` shows 2 warnings instead of 1.
 * **The `ubuntu` SSH user's `authorized_keys` was replaced by another operator today** (a key named `octopus-recovery-2026-09-16`); my key still works for `root`. I did not modify anyone's keys — confirm if you want the `ubuntu` access restored.
 * **Secrets are not in the backup archive by design** — a restore needs `/etc/hermes/shim.env`, `/etc/hermes/nats.env` and the Telegram token placed by hand.
 
