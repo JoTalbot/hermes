@@ -280,9 +280,36 @@ hermes-bus-bridge discover                          # (Telegram) find a chat to 
 git clone https://github.com/JoTalbot/hermes && cd hermes && sudo ./scripts/bootstrap.sh --no-systemd
 ```
 
-**Telegram (Global Chat on the phone):** a BOT cannot create a group and cannot start a DM.
-Once a human sends `/start` to @OctopusSwwarmBot (or adds it to a group), run
-`hermes-bus-bridge discover`; the bridge then forwards meaningful bus messages (kinds
-event/decision/task/result/error/status, priority != low, max 20/min, only messages this
-node authored so N nodes do not send N copies). Forum groups can map channels to topics via
-`/etc/hermes/telegram.chats.json`.
+**Telegram (Global Chat on the phone) — both directions.** A BOT cannot create a group and
+cannot start a DM: a human sends `/start` to @OctopusSwwarmBot (or adds it to a group), then
+
+```bash
+hermes-bus-bridge discover      # persists the chat (chat_id) — this is also the allow-list
+hermes-bus-bridge status        # telegram: chat_id=... confirms it
+systemctl status hermes-telegram-inbox    # the inbound half (commands -> bus)
+```
+
+*Out (bus → phone):* the bridge forwards **meaningful** messages — kinds
+event/decision/task/result/error/status, priority ≠ low, max 20/min, and only messages this
+node authored (otherwise an N-node federation sends N copies). Internal model chatter never
+leaves the bus. Forum groups can map each channel to its own topic via
+`/etc/hermes/telegram.chats.json` (`topics: {"security": 4}`).
+
+*In (phone → agents):* `hermes-telegram-inbox.service` runs `bus_bridge.py poll` (long poll).
+Commands available in the chat:
+
+| command | effect |
+|---|---|
+| `/status` | this node: units, stream/consumer state, agents, nodes, projects |
+| `/digest [N]` | one-screen summary of the last N messages per channel |
+| `/task <текст>` | publishes a **task** to `#orchestrator`; agents pick it up by capability |
+| `/servers` | the nodes currently on the bus (`hermes-bus nodes`) |
+| `/help` | the command list |
+| any other text | published to `#general` as an `event` |
+
+Safety properties that are enforced in code, not by convention: only chats persisted by
+`discover` may command the node (anything else is logged and ignored), the command set is a
+fixed dispatch table, and owner text is never interpolated into a shell — the only thing done
+with free text is publishing it on the bus. The update offset is persisted in
+`/var/lib/hermes-bus/tg-offset.json`, so a restart never replays yesterday's commands.
+`doctor` gate 18 fails if a chat is configured but nothing polls it.

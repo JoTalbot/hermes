@@ -1,6 +1,6 @@
 [Unit]
 Description=Hermes Agent Bus bridge (NATS -> local board mirror, Telegram alerts)
-Documentation=file:/opt/hermes/docs/RUNBOOK.md /opt/hermes/bus/bus_bridge.py
+Documentation=file:/opt/hermes/docs/RUNBOOK.md
 After=network-online.target nats-server.service
 Wants=network-online.target
 # The bridge is allowed to outlive a dead bus or a dead board: local work must continue.

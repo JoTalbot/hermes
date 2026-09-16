@@ -359,6 +359,21 @@ else
   warn "GatewayPin" "no drop-in — 'hermes gateway restart --system' can re-break the unit"
 fi
 
+# 18. Telegram two-way link — the owner's control plane. A chat exists => the inbox must be
+# running: a dead poller means the owner's commands vanish silently, which is exactly the
+# kind of "looks fine from the server" failure this doctor exists to prevent.
+if [[ -f /etc/hermes/telegram.chats.json ]]; then
+  if systemctl is-active --quiet hermes-telegram-inbox 2>/dev/null; then
+    ok "TelegramInbox" "chat configured, hermes-telegram-inbox active (commands -> bus)"
+  elif pgrep -f "bus_bridge.py poll" >/dev/null 2>&1; then
+    ok "TelegramInbox" "bus_bridge.py poll running (no-systemd supervisor)"
+  else
+    fail "TelegramInbox" "a chat is configured but nothing polls Telegram — owner commands are lost"
+  fi
+elif [[ -f /etc/hermes/telegram.env ]]; then
+  warn "TelegramInbox" "token present, no chat yet — send the bot /start, then: hermes-bus-bridge discover"
+fi
+
 echo
 if (( CRIT > 0 )); then
   printf '%sSYSTEM HEALTH: UNHEALTHY%s (%d critical, %d warnings)\n' "$RED" "$RST" "$CRIT" "$WARN"; exit 1

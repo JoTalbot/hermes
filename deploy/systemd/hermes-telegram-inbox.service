@@ -1,0 +1,26 @@
+[Unit]
+Description=Hermes Telegram inbox (owner commands -> agent bus)
+Documentation=file:/opt/hermes/docs/RUNBOOK.md
+After=network-online.target nats-server.service hermes-bus-bridge.service
+Wants=network-online.target hermes-bus-bridge.service
+# Outlives a dead bus: the inbox must not die because the transport blinked.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hermes-bus-bridge poll
+Restart=always
+RestartSec=5
+# Same reasoning as the bridge: root only for `sudo -u hermes hermes kanban ...` (needed
+# indirectly through hermes-bus) and for writing /var/lib/hermes-bus. The Telegram token
+# comes from a 0600 file; no provider key is involved. Owner text never reaches a shell.
+User=root
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hermes-telegram-inbox
+PrivateTmp=true
+ProtectHome=no
+
+[Install]
+WantedBy=multi-user.target

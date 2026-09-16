@@ -145,6 +145,12 @@ if systemctl is-active --quiet nats-server 2>/dev/null; then
 else
   SKIP=$((SKIP+1)); echo "  SKIP  nats-server is not running on this host"
 fi
+echo "[10] telegram inbox: the owner's control plane is guarded"
+ck "poll subcommand exists in the bridge" "poll" "$(grep -cE 'add_parser\(\"poll\"\)' bus/bus_bridge.py) poll"
+ck "unknown chats are ignored, never executed" "non-allowlisted" "$(grep -o 'ignoring command from non-allowlisted chat' bus/bus_bridge.py | head -1)"
+ck "owner text never reaches a shell" "ok" "$(grep -qE 'handle_owner_text' bus/bus_bridge.py && ! grep -qE 'shell=True|os\.system' bus/bus_bridge.py && echo ok)"
+ck "inbox unit shipped for a new node" "hermes-telegram-inbox.service" "$(grep -o 'hermes-telegram-inbox.service' scripts/install-bus.sh | head -1)"
+ck "inbox unit installed when a chat exists" "hermes-telegram-inbox" "$(systemctl list-unit-files 2>/dev/null | grep -o 'hermes-telegram-inbox' | head -1)"
 echo
 echo "════ $PASS passed · $FAIL failed · $SKIP skipped ════"
 [[ $FAIL -eq 0 ]]

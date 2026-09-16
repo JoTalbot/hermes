@@ -98,3 +98,10 @@ replaces, SIGHUP-reloads Prometheus, never edits existing rules or dashboards).
 
 Doctor gates 14-17 close the loop: transport, agents (including a real request to a live
 agent), federation freshness, and gateway-unit integrity.
+
+## Telegram inbox (gate 18)
+
+`hermes-telegram-inbox.service` is a service, not a metric source: it is checked by the
+doctor, not by Prometheus, because a poller that died cannot report its own death. Gate 18
+fails when `/etc/hermes/telegram.chats.json` exists but no `bus_bridge.py poll` process is
+running — the failure mode is otherwise invisible (the owner's commands simply vanish).

@@ -69,9 +69,22 @@ if [[ "$NOSYSTEMD" == "1" ]]; then
 else
   install -d -m 0755 /etc/systemd/system 2>/dev/null || true
   place "$SRC/deploy/systemd/hermes-bus-bridge.service" /etc/systemd/system/hermes-bus-bridge.service 0644
+  # Direction 2 of the chat: owner commands from Telegram. Installed here so a new node
+  # gets a two-way chat from the same idempotent script, not by hand.
+  place "$SRC/deploy/systemd/hermes-telegram-inbox.service" /etc/systemd/system/hermes-telegram-inbox.service 0644
   systemctl daemon-reload
   systemctl enable hermes-bus-bridge >/dev/null 2>&1
   systemctl restart hermes-bus-bridge
+  if [[ -f /etc/hermes/telegram.env ]] && [[ -f /etc/hermes/telegram.chats.json ]]; then
+    systemctl enable hermes-telegram-inbox >/dev/null 2>&1
+    systemctl restart hermes-telegram-inbox
+    echo "  telegram inbox: $(systemctl is-active hermes-telegram-inbox)"
+  else
+    # No token or no chat yet: don't leave a failing unit behind — it would be noise in
+    # `doctor` for a state the owner simply has not reached.
+    systemctl stop hermes-telegram-inbox >/dev/null 2>&1 || true
+    echo "  telegram inbox: skipped (no /etc/hermes/telegram.env or no chat discovered)"
+  fi
   sleep 4
   echo "  active: $(systemctl is-active hermes-bus-bridge)"
   journalctl -u hermes-bus-bridge --since -1min --no-pager -o cat 2>/dev/null | tail -4 | sed 's/^/  /'

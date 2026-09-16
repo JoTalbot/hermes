@@ -29,6 +29,21 @@ Usage
   bus_bridge.py send "text"         # one-off Telegram send (for scripts/cron/alerts)
   bus_bridge.py discover            # find chats that have talked to the bot, persist them
   bus_bridge.py status              # what this node sees on the bus right now
+  bus_bridge.py poll                # Telegram -> bus: run the owner's commands
+                                    # (systemd: hermes-telegram-inbox.service)
+
+DIRECTION 2: TELEGRAM -> BUS
+----------------------------
+The chat is a control plane, not only a feed. `poll` long-polls getUpdates and answers
+commands from chats that `discover` has persisted. Rules that make it safe:
+
+* Only allow-listed chats may command the node. An unknown chat is logged and ignored —
+  a leaked bot token must not become a remote shell.
+* The command set is a hard-coded dispatch table. Owner text is never interpolated into a
+  shell; the only thing done with arbitrary text is publishing it on the bus (which is a
+  message, not an execution).
+* Replies go through tg_send, so the per-minute cap and the forum-topic routing apply.
+* The update offset is persisted, so a restart does not replay yesterday's commands.
 """
 from __future__ import annotations
 
@@ -36,6 +51,7 @@ import argparse
 import asyncio
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.request
@@ -82,12 +98,13 @@ def tg_token() -> str | None:
     return read_env(TG_ENV).get("TELEGRAM_BOT_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN")
 
 
-def tg_api(token: str, method: str, payload: dict | None = None) -> dict:
+def tg_api(token: str, method: str, payload: dict | None = None,
+           timeout: int = 20) -> dict:
     url = f"https://api.telegram.org/bot{token}/{method}"
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(url, data=data,
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=20) as r:
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read())
 
 
@@ -223,6 +240,203 @@ def tg_line(env: dict) -> str:
     refs = ("\n" + "\n".join(f"• {r}" for r in env.get("refs") or [])) if env.get("refs") else ""
     return (f"{env['kind'].upper()} {where} · {env['from']}@{env['server']}\n"
             f"{env['text'][:1200]}{refs}")
+
+
+# ── Telegram -> bus: the owner's control plane ───────────────────────────────
+TG_OFFSET = STATE_DIR / "tg-offset.json"
+TG_MAX_TEXT = 3500          # Telegram's own limit is 4096; leave room for a header
+
+
+def tg_offset_load() -> int:
+    try:
+        return int(json.loads(TG_OFFSET.read_text()).get("offset") or 0)
+    except Exception:
+        return 0
+
+
+def tg_offset_save(offset: int) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    TG_OFFSET.write_text(json.dumps({"offset": offset}))
+
+
+def tg_allowlist() -> set[int]:
+    """Chats allowed to command this node: exactly those `discover` persisted."""
+    ids: set[int] = set()
+    chat = tg_chat() or {}
+    for key in ("chat_id",):
+        try:
+            if chat.get(key) is not None:
+                ids.add(int(chat[key]))
+        except (TypeError, ValueError):
+            pass
+    for extra in chat.get("extra_chats") or []:
+        try:
+            ids.add(int(extra))
+        except (TypeError, ValueError):
+            pass
+    return ids
+
+
+def _run(args: list[str], limit: int = TG_MAX_TEXT - 200) -> str:
+    """Run a FIXED command. Owner text never reaches a shell."""
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=90)
+        out = (r.stdout or "").strip() or (r.stderr or "").strip()
+    except Exception as e:
+        out = f"{type(e).__name__}: {e}"
+    return (out or "(no output)")[:limit]
+
+
+def owner_status() -> str:
+    import urllib.request as u
+    lines = [f"Hermes node {server_id()} ({node_name()})"]
+    units = ["nats-server", "hermes-bus-bridge", "hermes-agents", "hermes-serve",
+             "hermes-gateway", "hermes-shim"]
+    states = []
+    for u_ in units:
+        try:
+            st = subprocess.run(["systemctl", "is-active", u_], capture_output=True,
+                                text=True, timeout=10).stdout.strip() or "unknown"
+        except Exception:
+            st = "unknown"
+        states.append(f"{u_}={st}")
+    lines.append("units: " + ", ".join(states))
+    # Bus numbers come from the bridge's own view (always current); the exporter is only a
+    # fallback because its stream gauges are absent whenever its scrape of NATS' monitoring
+    # endpoint fails, and "?" in the owner's chat is worse than no line at all.
+    st = _run(["/usr/local/bin/hermes-bus-bridge", "status"], limit=1200)
+    for ln in st.splitlines():
+        if ln.strip().startswith(("stream", "consumer")) or "ack_pending" in ln:
+            lines.append("bus: " + ln.strip())
+    try:
+        m = u.urlopen("http://127.0.0.1:9725/metrics", timeout=8).read().decode()
+        def val(name: str) -> str:
+            for ln in m.splitlines():
+                if ln.startswith(name + " "):
+                    return ln.split()[-1]
+            return "?"
+        lines.append(f"agents: defined={val('hermes_agents_defined')} "
+                     f"runtime_up={val('hermes_agents_runtime_up')} "
+                     f"nodes_known={val('hermes_nodes_known')}")
+        lines.append(f"projects wired={val('hermes_projects_wired')}")
+    except Exception as e:
+        lines.append(f"metrics: unavailable ({type(e).__name__})")
+    return "\n".join(lines)
+
+
+def owner_digest(arg: str) -> str:
+    try:
+        n = max(1, min(20, int(arg)))
+    except (TypeError, ValueError):
+        n = 3
+    return _run(["/usr/local/bin/hermes-bus", "digest", "-n", str(n)])
+
+
+HELP = """Hermes control — команды:
+/status — состояние узла (юниты, шина, агенты)
+/digest [N] — сводка последних N сообщений по каналам
+/task <текст> — задача в #orchestrator (агенты разберут по capability)
+/servers — узлы на шине
+/help — эта справка
+любой другой текст → публикуется в #general как событие"""
+
+
+def handle_owner_text(text: str) -> str:
+    """Return the reply for one owner message. Dispatch only — no shell from text."""
+    t = (text or "").strip()
+    if not t:
+        return HELP
+    low = t.lower()
+    if low in ("/start", "/help", "help", "/?"):
+        return HELP
+    if low.startswith("/status"):
+        return owner_status()
+    if low.startswith("/digest"):
+        return owner_digest(t.split()[1] if len(t.split()) > 1 else "3")
+    if low.startswith("/servers") or low.startswith("/nodes"):
+        return _run(["/usr/local/bin/hermes-bus", "nodes"])
+    if low.startswith("/task"):
+        body = t[5:].strip()
+        if not body:
+            return "Формат: /task <что сделать>"
+        return _publish("orchestrator", "task", body)
+    if low.startswith("/"):
+        return "Неизвестная команда.\n\n" + HELP
+    return _publish("general", "event", t)
+
+
+def _publish(channel: str, kind: str, text: str) -> str:
+    r = subprocess.run(["/usr/local/bin/hermes-bus", "post", "--channel", channel,
+                        "--kind", kind, "--priority", "normal", text],
+                       capture_output=True, text=True, timeout=60)
+    out = (r.stdout or r.stderr or "").strip().splitlines()
+    mid = out[0].split()[0] if out and out[0] else "?"
+    return (f"{kind} → #{channel}  [{mid}]\n"
+            f"агенты увидят это на шине; зеркало: board agents-chat")
+
+
+def tg_poll_once(token: str, timeout: int = 25) -> int:
+    """One long-poll round. Returns the number of updates handled."""
+    offset = tg_offset_load()
+    try:
+        d = tg_api(token, "getUpdates",
+                   {"offset": offset, "timeout": timeout,
+                    "allowed_updates": ["message", "channel_post"]}, timeout=timeout + 15)
+    except Exception as e:
+        log(f"telegram poll failed: {type(e).__name__}: {e}")
+        time.sleep(5)
+        return 0
+    if not d.get("ok"):
+        log(f"telegram poll refused: {d.get('description')}")
+        time.sleep(10)
+        return 0
+    allowed = tg_allowlist()
+    handled = 0
+    for up in d.get("result") or []:
+        tg_offset_save(int(up["update_id"]) + 1)
+        m = up.get("message") or up.get("channel_post") or {}
+        chat = m.get("chat") or {}
+        frm = m.get("from") or {}
+        text = (m.get("text") or "").strip()
+        try:
+            cid = int(chat.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if not text:
+            continue
+        if frm.get("is_bot"):
+            continue
+        if cid not in allowed:
+            # Logged, never executed: an unknown chat must not be able to command.
+            log(f"telegram: ignoring command from non-allowlisted chat {cid} "
+                f"({chat.get('type')}, {(chat.get('title') or frm.get('username') or '?')}) "
+                f"— run `bus_bridge.py discover` if this is the owner")
+            continue
+        log(f"telegram <- {frm.get('username') or cid}: {text[:80]!r}")
+        reply = handle_owner_text(text)
+        ok, detail = tg_send(reply, force=True)
+        handled += 1
+        if not ok:
+            log(f"telegram reply failed: {detail}")
+    return handled
+
+
+def cmd_poll() -> int:
+    token = tg_token()
+    if not token:
+        log(f"no TELEGRAM_BOT_TOKEN in {TG_ENV}; inbox disabled")
+        return 2
+    if not tg_allowlist():
+        log("no chat configured yet — send the bot /start, then run `bus_bridge.py discover`")
+    log(f"telegram inbox up as {server_id()} (long polling)")
+    while True:
+        try:
+            tg_poll_once(token)
+        except KeyboardInterrupt:
+            return 0
+        except Exception as e:
+            log(f"poll loop error: {type(e).__name__}: {e}")
+            time.sleep(5)
 
 
 # ── the daemon ──────────────────────────────────────────────────────────────
@@ -387,6 +601,7 @@ def main() -> int:
     p = sub.add_parser("send"); p.add_argument("text"); p.add_argument("--force", action="store_true")
     sub.add_parser("discover")
     sub.add_parser("status")
+    sub.add_parser("poll")
     a = ap.parse_args()
     if a.cmd == "run":
         asyncio.run(run_daemon(rpc_echo=a.rpc_echo))
@@ -397,6 +612,8 @@ def main() -> int:
         return 0 if ok else 1
     if a.cmd == "discover":
         return tg_discover()
+    if a.cmd == "poll":
+        return cmd_poll()
     return cmd_status()
 
 

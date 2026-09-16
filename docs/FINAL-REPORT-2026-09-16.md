@@ -8,7 +8,7 @@ definition of done → this report)
 
 ---
 
-## STATUS: **READY** (1 subsystem WARNING, 0 FAIL)
+## STATUS: **READY** (0 FAIL, 0 WARNING in the 20 subsystems)
 
 | # | Subsystem | Verdict | Evidence (all re-run at the end of the build) |
 |---|---|---|---|
@@ -18,7 +18,7 @@ definition of done → this report)
 | 4 | **LLM Balancer** | **PASS** | doctor gate 2-4: 11 providers healthy, shim in front, `Inference: round-trip through balancer: DOCTOR_OK` (real tokens). Hermes holds **no provider keys** — `model.base_url = http://127.0.0.1:9700/v1` |
 | 5 | **Orchestrator** | **PASS** | `orchestrator` agent dispatches by capability, tracks `correlation_id`, rolls results into `#orchestrator`. Verified: `dispatch capability=monitoring handler=health` → monitoring agent answered → result rolled up (2 messages in the room) |
 | 6 | **Agent Bus** | **PASS** | NATS 2.10.7 + JetStream (`AGENT_BUS`, 7-day window, file storage), 9 channels, token auth, tailnet/docker-only firewall; `tests/bus-selftest.sh` **10/10** (fan-out, local mirror, dedupe, DM, request/reply, timeout, offline replay, priorities) |
-| 7 | **Global Chat** | **PASS** *(Telegram: WARNING)* | 9 channels on the bus + per-node durable kanban mirror + `hermes-bus digest` one-screen view + dashboard Kanban tab. Telegram forwarding is implemented and tested up to the point where a chat must exist — **a bot cannot create a group or start a DM: the owner must send `/start` to @OctopusSwwarmBot or add it to a group, then run `hermes-bus-bridge discover`** |
+| 7 | **Global Chat** | **PASS** | 9 channels on the bus + per-node durable kanban mirror + `hermes-bus digest` + dashboard Kanban tab. **Telegram is live and two-way** (chat `588113957`, allow-listed by `discover`): out — meaningful kinds only, ≤20/min, one copy per message across the federation; in — `hermes-telegram-inbox.service` long-polls the bot and serves `/status`, `/digest`, `/task`, `/servers`, `/help`; free text becomes an `event` on `#general`. Only the persisted chat may command the node, the command set is a fixed table, and owner text never reaches a shell |
 | 8 | **Agents** | **PASS** | 27 on the primary (6 core + 21 project), 6 each on the peers. Every agent: unique bus id, capabilities, declared handlers, own logs. A message names a handler, never a shell command — an agent cannot be made to run arbitrary code from the bus |
 | 9 | **Project profiles** | **PASS** | 21 project agents generated from the live filesystem + `git remote` (never from a GitHub 404). 16 checkouts exist, 5 are recorded as missing (`liza`, `octopus`, `words`, `words-home-ubuntu-batch19-oci`, `words-home-ubuntu-batch20-oci`) instead of being invented |
 | 10 | **Skills** | **PASS** | 12 Hermes-native skills enabled (`hermes skills list`), 3 of them added today (`agent-bus`, `agent-handlers`, `federation-node-join`); registration is idempotent (`register-skills.sh`, guard refuses an empty dir); prompt cost 14,584 B total |
@@ -33,14 +33,11 @@ definition of done → this report)
 | 19 | **Existing projects** | **PASS** | no project was modified: projects are only read (git status, path existence, service/container state). The one exited container (`logistics-recurring-demand-scheduler-1`) and the 198 unpulled commits in `/opt/logistics` are reported as observations, not "fixed" |
 | 20 | **Clean server / discovery** | **PASS** | a node needs only the repo URL and `NATS_TOKEN`; it picks up agents, skills and configuration from Git, registers a stable `server_id`, announces itself on `#server`, and is then addressable as `node-arm-0X/<role>` |
 
-**WARNING (owner action, 1 item):** Telegram has no chat yet — see subsystem 7. Everything else
-about that path is built, tested where possible, and fails with an actionable message rather
-than silently.
-
 **Doctor at close of work:** `SYSTEM HEALTH: DEGRADED (1 warning)` — the single warning is the
 pre-existing exited container listed under "Remaining issues" (another team's project). Every
 Hermes gate is `[OK]`: bus transport / token / bridge / stream, federation (3 nodes, 2 peers),
-gateway pin, agent liveness, inference round trip, GitHub (clean tree, 0 unpushed).
+gateway pin, agent liveness, inference round trip, Telegram inbox (gate 18), GitHub (clean
+tree, 0 unpushed).
 
 ---
 
@@ -54,8 +51,8 @@ gateway pin, agent liveness, inference round trip, GitHub (clean tree, 0 unpushe
 | skills enabled | **12** |
 | bus channels | **9** |
 | monitoring alerts / dashboard panels | **8** / **12** |
-| doctor gates | **17** |
-| tests | **58** repo + **10** bus + **10** federation per peer |
+| doctor gates | **18** |
+| tests | **63** repo + **10** bus + **10** federation per peer |
 | backups | nightly 03:30 UTC, verified (sha256 + content) and rehearsed |
 
 ## Errors found and fixed while building
@@ -76,10 +73,11 @@ gateway pin, agent liveness, inference round trip, GitHub (clean tree, 0 unpushe
 14. **`install` refused self-copies** when the repo is the install target (`/opt/hermes`) — every installer now uses a `place()` helper.
 15. **Agent-runtime selftest ran the wrong agent id** on scoped nodes; the installer now resolves the first registered id.
 16. **`hermes-bus request` to an unknown peer was answered by the bridge's wildcard echo** — the echo now answers only for its own node id, so a missing agent really times out.
+17. **The chat was one-way.** Once the owner connected Telegram, the bus could talk to the phone but the phone could not talk back — a control plane that only reports is a dashboard, not a control plane. Added the inbound half (`bus_bridge.py poll` + `hermes-telegram-inbox.service`, gate 18), with the allow-list, the fixed command table and the no-shell rule above.
+18. **Deploying generated config broke the node** — my helper copied `config/agents/*.yaml`, whose handler paths are generated *on the target*, from the working copy; 3 tests went red describing `/home/user/...`. `wire-agents.sh` regenerated them and the deploy script now refuses to ship `config/` at all.
 
 ## Remaining issues / honest limitations
 
-* **Telegram chat does not exist yet** (owner action above). Until then the on-phone Global Chat is the dashboard's Kanban tab.
 * **5 of 21 project checkouts are absent** (`liza`, `octopus`, `words`, `words-home-ubuntu-batch19-oci`, `words-home-ubuntu-batch20-oci`); their agents exist and report the missing path. Not fixed on purpose — reinstalling another team's tree is not my call.
 * **Peer nodes are containers**, not separate physical hosts. The federation path is identical (`bootstrap.sh`), but a real second box would also exercise host-specific networking.
 * **`/opt/logistics` is 198 commits behind its upstream** — reported, untouched.
@@ -89,7 +87,7 @@ gateway pin, agent liveness, inference round trip, GitHub (clean tree, 0 unpushe
 
 ## Next improvements (in the order I would do them)
 
-1. **Telegram in, not just out**: once a chat exists, add inbound commands (task creation, digest, approvals) with an allowlist — the gateway's own allowlist mechanism, not a second bot.
+1. **Approvals in the chat**: `/task` creates work today; the next step is task *approval* and `/cancel` for a running task, reusing the same dispatch table.
 2. **A real second host**: run `bootstrap.sh` on a second VM and let it serve project agents for its own projects (the registry already supports node-scoped roles).
 3. **Bus parity for external systems**: bind a JetStream stream for project events (CI results, deploy hooks) so `#github` and `#projects` fill themselves instead of being polled.
 4. **Backups of the bus itself**: JetStream retention is 7 days and the local mirror is in the nightly archive — consider exporting the stream state weekly for a longer history.
