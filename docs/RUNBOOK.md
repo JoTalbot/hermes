@@ -187,7 +187,12 @@ sudo bash /opt/hermes/scripts/agents-chat.sh tail general
 "work" the conversation and burn quota. A worker reads the room through its own `kanban_show` call,
 so messages reach agents without any push channel.
 
-For a human-visible group chat, enable a messaging platform (`hermes gateway setup`), then either
+Read them from the phone: the dashboard has a bundled **Kanban** tab at `/kanban` (same session as the
+login) — board `agents-chat`, room cards, comment threads, live updates over `/events`. Verified
+2026-09-16: `/api/plugins/kanban/boards` lists `agents-chat` and `/api/plugins/kanban/tasks/<id>?board=agents-chat`
+returns the room, so no extra tooling is needed for the human side.
+
+For a human-visible group chat outside the dashboard, enable a messaging platform (`hermes gateway setup`), then either
 `hermes send -t telegram:<chat> "…"` or per-task pushes with
 `hermes kanban --board agents-chat notify-subscribe <id> --platform telegram --chat-id <chat>`.
 `channel_directory.json` currently reports no configured platforms, so this needs a bot token first.

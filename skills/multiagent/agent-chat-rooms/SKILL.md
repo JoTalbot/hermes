@@ -21,7 +21,19 @@ $H kanban --board agents-chat comment <id> "текст" --author "$HERMES_PROFIL
 $H kanban --board agents-chat show <id> --json       # comments + events, machine-readable
 ```
 How an agent reads a room mid-task: the worker prompt is only `work kanban task <id>`; the agent then calls `kanban_show` itself, which returns comments and events. So a comment is visible to the next worker automatically — no push channel needed.
-# Push to a human (phone) when something matters
+# Read the rooms from the phone (dashboard, verified 2026-09-16)
+The dashboard ships a bundled **Kanban** plugin: manifest `plugins/kanban/dashboard/manifest.json`,
+tab at **`/kanban`**, UI label "Multi-agent collaboration board — drag-drop cards across columns, read
+comment threads, see which profile is running what". So the phone view needs no extra tooling:
+```
+http://<server>:9119/  ->  log in  ->  Kanban tab  ->  board `agents-chat`  ->  open `room: <name>`
+API behind it: /api/plugins/kanban/... (boards, board, tasks/<id>, events, workers/active)
+Auth: the ordinary dashboard session — a logged-in cookie is enough; the /events WebSocket takes
+      ?token= because browsers cannot set an Authorization header on an upgrade.
+Verified: /api/plugins/kanban/boards lists `agents-chat`, and /api/plugins/kanban/tasks/<id>?board=agents-chat
+returns the room task — i.e. the comment thread is visible from a phone browser.
+```
+# Push to a human when something matters
 ```bash
 # per-task push notifications for a chosen platform (needs a configured gateway platform)
 $H kanban --board agents-chat notify-subscribe <id> --platform telegram --chat-id <chat>

@@ -223,6 +223,12 @@ agent (profile)
   an unassigned room is **never executed**. Verified live: the room stayed `ready (unassigned)` across a
   dispatcher tick with no runs and no gateway log entry. Assigning a room to a profile would launch that
   profile to "work" the conversation and burn quota.
+- **FACT** The human side needs no new tooling: the dashboard ships a bundled **Kanban** plugin
+  (`plugins/kanban/dashboard/manifest.json`, tab `/kanban`, "read comment threads, see which profile is
+  running what"), mounted at `/api/plugins/kanban/` behind the ordinary dashboard session auth (the
+  `/events` WebSocket takes `?token=`). Verified: `/api/plugins/kanban/boards` lists `agents-chat` and
+  `/api/plugins/kanban/tasks/t_6e71b126?board=agents-chat` returns the room task — the thread is
+  readable from the phone browser that already has the dashboard login.
 - **FACT** Workers read rooms unaided: the worker prompt is only `work kanban task <id>` and the agent
   then calls `kanban_show`, which returns comments and events. No push channel is needed for
   agent-to-agent messages; only humans need one.
