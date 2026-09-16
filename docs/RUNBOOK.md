@@ -139,6 +139,59 @@ Symptom: agents answer nothing / shim returns `502 upstream_unreachable`.
 3. `401` from the shim = key mismatch between `/etc/hermes/shim.env` and `~/.hermes/.env`. Re-copy; do not paste the value into a shell.
 4. `200` with empty content = balancer answered with a shape we don't flatten. `deploy/shim/aios_openai_shim.py:flatten_upstream` lists the accepted keys.
 
+## Skills: where they live, and how they load
+
+```bash
+# what Hermes currently sees
+sudo -u hermes env HERMES_HOME=/home/hermes/.hermes HOME=/home/hermes \
+  /home/hermes/.hermes-venv/bin/hermes skills list
+
+# re-register after a rebuild (idempotent; install.sh and bootstrap.sh call it too)
+sudo bash /opt/hermes/scripts/register-skills.sh
+```
+
+Skills are authored in this repo as `skills/<category>/<name>/SKILL.md` (frontmatter `name` +
+`description`, then Why / Use / Do not / Lesson) and loaded from there — the repo stays the single
+source of truth, nothing is copied into `HERMES_HOME`.
+
+**The skill loader reads `$HERMES_HOME/config.yaml` ONLY.** `agent/skill_utils.py` resolves
+`skills.external_dirs` through `get_config_path()` and parses that file directly; it never consults
+the managed scope in `/etc/hermes`. Verified 2026-09-16: with the entry only in
+`/etc/hermes/config.yaml`, `hermes skills list` reported **0**; adding it to the user config made all
+nine appear at once. That is why registration is a script and why `install.sh`/`bootstrap.sh` call it.
+
+Cost matters: every enabled skill's name + description goes into **every** prompt. Measured with
+`hermes prompt-size` — 0 skills: 11,845 B system prompt, skills index 0 B; 9 skills: 14,279 B, index
+870 B. Before adding a large set, measure. The Octopus catalogue (243 skills) stays a pointer
+(`octopus-skill-catalog`), not an import.
+
+Authoring rules: one skill = one repeatable operation; `description` says **when** to use it, not what
+it is; always include a "Do not" section, because the expensive mistakes are the ones a future agent
+repeats. New skills are committed like code.
+
+## Talking to other agents (shared rooms)
+
+Hermes has no chat server; the kanban bus is the chat. A **room** is an unassigned task on board
+`agents-chat` whose comments are messages:
+
+```bash
+sudo bash /opt/hermes/scripts/agents-chat.sh rooms
+sudo bash /opt/hermes/scripts/agents-chat.sh say general "текст"          # --as <profile> to sign
+sudo bash /opt/hermes/scripts/agents-chat.sh read general 20
+sudo bash /opt/hermes/scripts/agents-chat.sh tail general
+```
+
+**Safety invariant** (verified, do not break): the dispatcher only claims tasks with
+`status='ready' AND assignee IS NOT NULL`, and no `kanban.default_assignee` is configured, so an
+**unassigned** room is never executed. Assigning a room to a profile would launch that profile to
+"work" the conversation and burn quota. A worker reads the room through its own `kanban_show` call,
+so messages reach agents without any push channel.
+
+For a human-visible group chat, enable a messaging platform (`hermes gateway setup`), then either
+`hermes send -t telegram:<chat> "…"` or per-task pushes with
+`hermes kanban --board agents-chat notify-subscribe <id> --platform telegram --chat-id <chat>`.
+`channel_directory.json` currently reports no configured platforms, so this needs a bot token first.
+
 ## Backups and recovery
 
 Scheduled since 2026-09-15: `hermes-backup.timer` runs `hermes-backup.service` daily at **03:30 UTC**

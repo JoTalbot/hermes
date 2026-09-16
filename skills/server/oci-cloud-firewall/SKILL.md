@@ -1,14 +1,6 @@
 ---
 name: oci-cloud-firewall
-purpose: open/verify an inbound port on an OCI instance — the cloud gate, not just ufw
-scope: any port on arm-server-01 reachable from outside; empty subnet security list; pre-flight for "the port is open but nothing can reach it"
-inputs: scripts/oci-open-port.sh <port>, scripts/oci-firewall.sh inspect, /root/.oci/config, region iad
-outputs: ingress rule added to the subnet's security list + proof from an external vantage point; exit 0/1
-permissions: writes the OCI tenancy security list (root; replaces the whole rule set — read the Do-not)
-dependencies: /home/ubuntu/oci-venv/bin/oci (3.93.0), python3
-projects: all
-version: 1.0.0
-last_updated: 2026-09-15
+description: Open or verify an inbound port on this OCI instance, where the CLOUD security list - not ufw - decides whether a packet ever arrives. Use when a port is allowed locally but unreachable from the internet.
 ---
 # Why
 Setting the dashboard to `0.0.0.0:9119` and adding `ufw allow 9119/tcp` was **not enough**, and the

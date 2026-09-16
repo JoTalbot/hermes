@@ -38,6 +38,8 @@ systemctl restart hermes-shim.service 2>/dev/null || log "     shim unit not pre
 sleep 2
 log "7/11 skills + agent profiles"
 bash "$REPO_DIR/scripts/install-agents.sh" || log "     profile install skipped/failed — not fatal, kanban still works"
+log "7b/11 skills registration"
+bash "$REPO_DIR/scripts/register-skills.sh" || log "     skills registration failed — profiles would run with 0 skills"
 log "8/11 agent bus"
 bash "$REPO_DIR/scripts/init-bus.sh" || log "     bus init failed — see doctor output below"
 log "9/11 server registration"

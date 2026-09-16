@@ -25,6 +25,30 @@ the owner, not for an agent to make unilaterally. (2) `octopus-agent-recovery` i
 approval/pairing service; `config/policies/agent-policy.yaml` should call it rather than invent a second
 approval store.
 
+## Hermes-native skills (THIS is what Hermes loads)
+
+Layout changed on 2026-09-16: each skill is now `<category>/<name>/SKILL.md` with YAML
+frontmatter `name` + `description`. That is not cosmetic — Hermes discovers skills by
+`rglob("SKILL.md")` and needs `name`/`description` to build its skills index, so the old flat
+`<category>/<name>.md` files were invisible to every agent. `scripts/register-skills.sh` points
+Hermes at this directory via `skills.external_dirs` in `$HERMES_HOME/config.yaml`.
+
+| name | category | what it is for | origin |
+|---|---|---|---|
+| `disk-gate` | backup | refuse installs when the disk cannot hold them | this repo |
+| `oci-cloud-firewall` | server | open/verify the CLOUD firewall gate, not just ufw | this repo |
+| `step-status-protocol` | multiagent | record step status for parallel agents | `/root/agents/57`, `005-MULTIAGENT-PARALLEL-SKILLS.md` |
+| `skills-first` | multiagent | find → use → improve → create, and where catalogues live | `#57 §4-6`, `005 §4-5` |
+| `octopus-skill-catalog` | multiagent | pointer to the 243 existing Octopus skills | `/root/agents/-Octopus/skills` |
+| `agent-chat-rooms` | multiagent | the shared room where profiles exchange messages | built and tested 2026-09-16 |
+| `response-format-ru` | ecosystem | mandated answer format, emoji dictionary, report template | `#70`, `001-GENERAL.md`, `TEMPLATE.md` |
+| `chatgpt-backend-export` | chatgpt | export all ChatGPT chats (TLS-fingerprint trick) | `/opt/orchestrator/chatgpt_export` |
+| `chatgpt-ui-driver` | chatgpt | drive the ChatGPT web UI over CDP, incl. reconnect rules | `/opt/orchestrator/agent_jo` |
+
+Cost: 9 skills add **870 B** to the system prompt (measured with `hermes prompt-size`; baseline
+with 0 skills was 11,845 B). Registering the whole Octopus catalogue would add ~20+ KB and starve
+the balancer's prompt budget — that is why `octopus-skill-catalog` is a pointer, not an import.
+
 ## New, in this repo
 
 | name | purpose | scope | inputs | outputs | permissions | version | last_updated |
@@ -46,7 +70,7 @@ approval store.
 
 ## Lessons promoted into skills on 2026-09-15
 
-- `skills/server/oci-cloud-firewall.md` — two firewalls, and the cloud one is authoritative. Born from a
+- `skills/server/oci-cloud-firewall/SKILL.md` — two firewalls, and the cloud one is authoritative. Born from a
   port that was "open" for an hour and unreachable from outside the whole time. Also carries the trap
   that a credential can authenticate yet belong to the wrong tenancy.
 - `skills/backup/` — `backup.sh` silently archived `/root/.hermes` (3 entries) and printed "verified";
@@ -58,6 +82,6 @@ approval store.
 
 | proposal | trigger seen | next step |
 |---|---|---|
-| `preinstall-disk-gate` | 98%-full box, installs would have died at ENOSPC | promoted: `skills/backup/disk-gate.md` |
+| `preinstall-disk-gate` | 98%-full box, installs would have died at ENOSPC | promoted: `skills/backup/disk-gate/SKILL.md` |
 | `privilege-aware-discovery` | dirty counts wrong without sudo; `/root` size misreported | spec a skill that re-probes with root and refuses on disagreement |
 | `quarantine-not-delete` | `rm -rf /opt/liza-mock` deleted two live services mid-audit | move-to-quarantine + kanban event, never delete |

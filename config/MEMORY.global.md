@@ -191,3 +191,45 @@ agent (profile)
   it as evidence of an unmanaged automation and find it.
 - **OBSERVATION** `:5434` (postgres for the logistics control plane) listens on 0.0.0.0/[::] with
   a ufw rule from any address. Pre-existing; flag it, do not change it without an owner.
+
+## 9. Skills and the agent chat (added 2026-09-16)
+
+- **FACT** Skills live in this repo as `skills/<category>/<name>/SKILL.md` (frontmatter `name` +
+  `description`, then Why / Use / Do not / Lesson) and are loaded from there — the repo is the single
+  source of truth, nothing is copied into `HERMES_HOME`.
+- **FACT (cost an hour) The skill loader reads `$HERMES_HOME/config.yaml` ONLY.** `agent/skill_utils.py`
+  resolves `skills.external_dirs` via `get_config_path()`, which is `HERMES_HOME/config.yaml`, and parses
+  it directly with `_load_raw_config()`. It **never** consults the managed scope in `/etc/hermes`.
+  Measured: entry present only in `/etc/hermes/config.yaml` → `hermes skills list` = **0 skills**;
+  the same entry in the user config → 9 skills immediately. Consequence: this setting is runtime state,
+  so it must be re-applied after any rebuild — hence `scripts/register-skills.sh` (idempotent, called by
+  `install.sh` and `bootstrap.sh`) instead of a line in the managed config.
+- **FACT** 9 skills are registered and enabled: `disk-gate`, `oci-cloud-firewall`, `step-status-protocol`,
+  `skills-first`, `octopus-skill-catalog`, `agent-chat-rooms`, `response-format-ru`,
+  `chatgpt-backend-export`, `chatgpt-ui-driver`. Verified through the agent-facing path:
+  `tools.skills_tool.skills_list()` returns all nine with descriptions and `skill_view()` loads bodies.
+- **FACT (budget)** Every enabled skill's `name` + `description` enters **every** system prompt.
+  `hermes prompt-size`: 0 skills → 11,845 B, skills index 0 B; 9 skills → 14,279 B, index 870 B.
+  The Octopus catalogue holds **243** `SKILL.md` (core 132, meta 36, swarm 34, memory 32, research 4,
+  dr 2, mcp 2); importing it would add ~20+ KB and starve the balancer's prompt budget (the balancer
+  truncates the assembled prompt at 4000 chars). It stays a **pointer** skill, never an import.
+- **FACT** `/mnt/agents` is a **symlink to `/root/agents`** — older instructions say `/mnt/agents/...`;
+  it is the same tree, not a second copy.
+- **FACT** The agent chat is the kanban bus. A **room** is an unassigned task on board `agents-chat`
+  (`room: <name>`, created with `--idempotency-key room-<name>` so the id is stable forever) whose
+  **comments are messages**, authored by `$HERMES_PROFILE`.
+- **FACT (safety invariant)** The dispatcher claims only `status='ready' AND assignee IS NOT NULL`
+  (`kanban_db.py` dispatch candidate query) and no `kanban.default_assignee` fallback is configured, so
+  an unassigned room is **never executed**. Verified live: the room stayed `ready (unassigned)` across a
+  dispatcher tick with no runs and no gateway log entry. Assigning a room to a profile would launch that
+  profile to "work" the conversation and burn quota.
+- **FACT** Workers read rooms unaided: the worker prompt is only `work kanban task <id>` and the agent
+  then calls `kanban_show`, which returns comments and events. No push channel is needed for
+  agent-to-agent messages; only humans need one.
+- **FACT** Human-visible push needs a messaging platform: `hermes gateway setup`, then
+  `hermes send -t telegram:<chat> "…"` or per-task `notify-subscribe --platform telegram --chat-id <id>`.
+  `channel_directory.json` reported `{"platforms": {}}` on 2026-09-16 — no platform is configured yet.
+- **OBSERVATION (small, cost 20 minutes)** `hermes skills list` ends with a **trailing blank line**, so
+  `... | tail -1` yields an empty string and any check built on it reports "could not query" on a healthy
+  system. Read the summary line by content (`grep -E 'hub-installed'`). A verification that fails on
+  success is worse than no verification — the same failure mode as the `backup.sh` false "verified".

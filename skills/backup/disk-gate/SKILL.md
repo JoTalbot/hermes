@@ -1,14 +1,6 @@
 ---
 name: disk-gate
-purpose: refuse installs/pulls when the root filesystem cannot hold them
-scope: pre-flight for any step that writes >100 MB
-inputs: HERMES_MIN_FREE_GB (default 6)
-outputs: exit 0 + "disk ok" or exit 1 + the exact re-run instruction
-permissions: read-only (df)
-dependencies: coreutils
-projects: all
-version: 1.0.0
-last_updated: 2026-09-15
+description: Refuse an install, pull or download when the root filesystem cannot hold it, and say why in one line. Use before any step that writes more than ~100 MB (pip install, docker pull, model/browser download).
 ---
 # Why
 On `arm-server-01` the root filesystem sat at 98% (3.8 G free) during this audit. `pip install`,

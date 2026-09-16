@@ -125,6 +125,15 @@ CFGEOF
   chown "$HERMES_USER:$HERMES_USER" "$CFG"; chmod 0600 "$CFG"
 fi
 
+# ---- 6b. register skills ----
+# WHY HERE: the skill loader reads skills.external_dirs from $HERMES_HOME/config.yaml
+# ONLY (agent/skill_utils.py -> get_config_path()), never from the managed scope in
+# /etc/hermes — verified 2026-09-16. Without this step a freshly installed node runs
+# every profile with zero skills and looks healthy while doing it.
+if [[ -x "$REPO_DIR/scripts/register-skills.sh" ]]; then
+  bash "$REPO_DIR/scripts/register-skills.sh" || log "skills registration failed — agents will run with 0 skills"
+fi
+
 # ---- 7. units ----
 for u in hermes-shim hermes-serve; do
   install -m 0644 -o root -g root "$REPO_DIR/deploy/systemd/$u.service" "/etc/systemd/system/$u.service"
