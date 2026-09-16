@@ -58,6 +58,8 @@ the balancer's prompt budget — that is why `octopus-skill-catalog` is a pointe
 | `discover-repos` | enumerate git repos as validated TSV | filesystem | — | TSV with `git_ok` | read-only (needs root) | 1.1.0 | 2026-09-15 |
 | `gen-project-agents` | project profiles from measured data | repo | TSV | `config/agents/projects/*.yaml` | write repo | 1.0.0 | 2026-09-15 |
 | `backup` | verified config/state snapshots; **fails loud on a wrong/empty state dir** | Hermes layer | `HERMES_HOME`, `HERMES_BACKUP_DIR` | tar.gz + entry counts | reads state, writes backup dir | **1.1.0** | 2026-09-15 |
+| `register-skills` | point Hermes at the repo's skills dir (idempotent) | Hermes layer | `HERMES_SKILLS_DIR` | entry in `$HERMES_HOME/config.yaml` + verified count | writes runtime config | 1.0.0 | 2026-09-16 |
+| `agents-chat` | shared rooms for all profiles: say/read/tail/subscribe | multiagent | `HERMES_PROFILE` | comments on board `agents-chat` | writes kanban comments | 1.0.0 | 2026-09-16 |
 | `verify-backup` | extract the newest archive and compare content hashes to the live tree | Hermes layer | archive path (default: newest) | `VERIFICATION OK/FAILED` | read-only + temp dir | 1.0.0 | 2026-09-15 |
 | `oci-cloud-firewall` | open/verify an inbound port on the **cloud** gate, not just ufw | whole node | port number | ingress rule + external proof | writes the OCI security list (root) | 1.0.0 | 2026-09-15 |
 | `dashboard-auth` | password-gated dashboard on a public port | remote access | `/etc/hermes/dashboard.env` | 302/401/200 behaviour | writes `$HERMES_HOME`, reads 0600 env | 1.0.0 | 2026-09-15 |
