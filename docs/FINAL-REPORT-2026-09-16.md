@@ -37,6 +37,11 @@ definition of done → this report)
 about that path is built, tested where possible, and fails with an actionable message rather
 than silently.
 
+**Doctor at close of work:** `SYSTEM HEALTH: DEGRADED (1 warning)` — the single warning is the
+pre-existing exited container listed under "Remaining issues" (another team's project). Every
+Hermes gate is `[OK]`: bus transport / token / bridge / stream, federation (3 nodes, 2 peers),
+gateway pin, agent liveness, inference round trip, GitHub (clean tree, 0 unpushed).
+
 ---
 
 ## Counts
