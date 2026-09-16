@@ -20,7 +20,7 @@ definition of done → this report)
 | 6 | **Agent Bus** | **PASS** | NATS 2.10.7 + JetStream (`AGENT_BUS`, 7-day window, file storage), 9 channels, token auth, tailnet/docker-only firewall; `tests/bus-selftest.sh` **10/10** (fan-out, local mirror, dedupe, DM, request/reply, timeout, offline replay, priorities) |
 | 7 | **Global Chat** | **PASS** *(Telegram: WARNING)* | 9 channels on the bus + per-node durable kanban mirror + `hermes-bus digest` one-screen view + dashboard Kanban tab. Telegram forwarding is implemented and tested up to the point where a chat must exist — **a bot cannot create a group or start a DM: the owner must send `/start` to @OctopusSwwarmBot or add it to a group, then run `hermes-bus-bridge discover`** |
 | 8 | **Agents** | **PASS** | 27 on the primary (6 core + 21 project), 6 each on the peers. Every agent: unique bus id, capabilities, declared handlers, own logs. A message names a handler, never a shell command — an agent cannot be made to run arbitrary code from the bus |
-| 9 | **Project profiles** | **PASS** | 21 project agents generated from the live filesystem + `git remote` (never from a GitHub 404). 19 paths exist, 2 are recorded as missing (`octopus`, `liza`) instead of being invented |
+| 9 | **Project profiles** | **PASS** | 21 project agents generated from the live filesystem + `git remote` (never from a GitHub 404). 16 checkouts exist, 5 are recorded as missing (`liza`, `octopus`, `words`, `words-home-ubuntu-batch19-oci`, `words-home-ubuntu-batch20-oci`) instead of being invented |
 | 10 | **Skills** | **PASS** | 12 Hermes-native skills enabled (`hermes skills list`), 3 of them added today (`agent-bus`, `agent-handlers`, `federation-node-join`); registration is idempotent (`register-skills.sh`, guard refuses an empty dir); prompt cost 14,584 B total |
 | 11 | **Memory / Knowledge** | **PASS** | Fact/Observation/Hypothesis/Decision/Lesson in `config/MEMORY.global.md` §1-§10 and `memory/incidents/` (13 incident records, 5 written today from real failures) |
 | 12 | **GitHub source of truth** | **PASS** | repo `JoTalbot/hermes` — clean tree, 0 ahead/behind, `scripts/secret-scan.sh --worktree` clean, every artifact (bus, agents, wiring generator, tests, deploy units, monitoring rules, docs) is committed and pushed |
@@ -45,7 +45,7 @@ than silently.
 |---|---|
 | servers / Hermes nodes on the bus | **3** (`arm-server-01`, `node-arm-02`, `node-arm-03`) |
 | agents wired | **27** on the primary (6 core + 21 project), 6 per peer |
-| projects with an agent | **21** (19 with a live checkout, 2 recorded as missing) |
+| projects with an agent | **21** (16 with a live checkout, 5 recorded as missing) |
 | skills enabled | **12** |
 | bus channels | **9** |
 | monitoring alerts / dashboard panels | **8** / **12** |
@@ -75,7 +75,7 @@ than silently.
 ## Remaining issues / honest limitations
 
 * **Telegram chat does not exist yet** (owner action above). Until then the on-phone Global Chat is the dashboard's Kanban tab.
-* **2 of 21 project checkouts are absent** (`octopus`, `liza`); their agents exist and report the missing path. Not fixed on purpose — reinstalling another team's tree is not my call.
+* **5 of 21 project checkouts are absent** (`liza`, `octopus`, `words`, `words-home-ubuntu-batch19-oci`, `words-home-ubuntu-batch20-oci`); their agents exist and report the missing path. Not fixed on purpose — reinstalling another team's tree is not my call.
 * **Peer nodes are containers**, not separate physical hosts. The federation path is identical (`bootstrap.sh`), but a real second box would also exercise host-specific networking.
 * **`/opt/logistics` is 198 commits behind its upstream** — reported, untouched.
 * **One exotic container is exited** (`logistics-recurring-demand-scheduler-1`) — pre-existing, belongs to another project.
@@ -89,4 +89,4 @@ than silently.
 3. **Bus parity for external systems**: bind a JetStream stream for project events (CI results, deploy hooks) so `#github` and `#projects` fill themselves instead of being polled.
 4. **Backups of the bus itself**: JetStream retention is 7 days and the local mirror is in the nightly archive — consider exporting the stream state weekly for a longer history.
 5. **Alert routing**: the 8 rules exist but nothing notifies a human yet; route critical alerts to the Telegram chat and the `#incidents` channel.
-6. **Turn the 2 missing project checkouts into an explicit decision** (restore, relocate, or remove the agents).
+6. **Turn the 5 missing project checkouts into an explicit decision** (restore, relocate, or remove the agents).
