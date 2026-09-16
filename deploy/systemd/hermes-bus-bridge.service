@@ -1,0 +1,28 @@
+[Unit]
+Description=Hermes Agent Bus bridge (NATS -> local board mirror, Telegram alerts)
+Documentation=file:/opt/hermes/docs/RUNBOOK.md /opt/hermes/bus/bus_bridge.py
+After=network-online.target nats-server.service
+Wants=network-online.target
+# The bridge is allowed to outlive a dead bus or a dead board: local work must continue.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hermes-bus-bridge run --rpc-echo
+Restart=always
+RestartSec=5
+# Root is required for two things only: `sudo -u hermes hermes kanban ...` (the board is
+# 0700 hermes:hermes) and writing /var/lib/hermes-bus. It talks to NATS with a token
+# from a 0600 file, never with a provider API key.
+User=root
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hermes-bus-bridge
+# Hardening that does not break the sudo/hermes paths above.
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectHome=no
+
+[Install]
+WantedBy=multi-user.target

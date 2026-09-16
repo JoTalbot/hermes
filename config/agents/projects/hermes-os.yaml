@@ -72,3 +72,21 @@ identity: 'You are the hermes project agent of the Hermes OS.
   go to server-guardian; CI/PR mechanics to github; exposure questions to security.
 
   Everything you write to memory is tagged FACT / OBSERVATION / HYPOTHESIS / DECISION / LESSON.'
+
+# --- agent bus wiring (managed by scripts/wire-agents.sh — do not hand-edit) ---
+bus:
+  agent_id: proj-hermes-os
+  purpose: "Project agent для hermes-os: /opt/hermes (https://github.com/JoTalbot/hermes)"
+  capabilities:
+  - project:hermes-os
+  - repo-state
+  handlers:
+    status:
+      run: bash /opt/hermes/agents/checks/project-check.sh
+      timeout: 180
+      env:
+        PROJECT_SLUG: "hermes-os"
+        PROJECT_PATH: "/opt/hermes"
+        PROJECT_REPO: "https://github.com/JoTalbot/hermes"
+    identity: {}          # runtime built-in
+    ping: {}          # runtime built-in

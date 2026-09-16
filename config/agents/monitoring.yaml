@@ -68,3 +68,20 @@ safety:
   - add scrapes as new jobs; never edit octopus-* rules
   rationale: §27 says do not break existing monitoring — the Octopus stack is shared with other workloads
   policy: config/policies/agent-policy.yaml → per_role.monitoring (this block mirrors it; the policy file is authoritative)
+
+# --- agent bus wiring (managed by scripts/wire-agents.sh — do not hand-edit) ---
+bus:
+  agent_id: monitoring
+  purpose: "Наблюдаемость: Prometheus targets, экспортеры, Grafana, правила алертов, состояние шины агентов."
+  capabilities:
+  - monitoring
+  - prometheus
+  - grafana
+  - metrics
+  - alerts
+  handlers:
+    health:
+      run: bash /opt/hermes/agents/checks/monitoring-health.sh
+      timeout: 180
+    identity: {}          # runtime built-in
+    ping: {}          # runtime built-in

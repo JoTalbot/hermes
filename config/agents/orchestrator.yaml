@@ -70,3 +70,22 @@ safety:
   - human approval for any task that changes server state
   rationale: 'planning-only by design: decomposition must not be able to become execution'
   policy: config/policies/agent-policy.yaml → per_role.orchestrator (this block mirrors it; the policy file is authoritative)
+
+# --- agent bus wiring (managed by scripts/wire-agents.sh — do not hand-edit) ---
+bus:
+  agent_id: orchestrator
+  purpose: "Единая точка маршрутизации: принимает задачу, выбирает агента по возможностям, отслеживает correlation_id и собирает результат."
+  capabilities:
+  - orchestration
+  - routing
+  - coordination
+  - planning
+  handlers:
+    status:
+      run: bash /opt/hermes/agents/checks/orchestrator-status.sh
+      timeout: 180
+    dispatch: {}          # runtime built-in
+    agents: {}          # runtime built-in
+    skills: {}          # runtime built-in
+    identity: {}          # runtime built-in
+    ping: {}          # runtime built-in

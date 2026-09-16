@@ -73,3 +73,24 @@ safety:
   rationale: the repo is the recovery path; poisoning it with a secret or a force-push destroys the only source
     of truth
   policy: config/policies/agent-policy.yaml → per_role.github (this block mirrors it; the policy file is authoritative)
+
+# --- agent bus wiring (managed by scripts/wire-agents.sh — do not hand-edit) ---
+bus:
+  agent_id: github
+  purpose: "GitHub как источник истины: состояние репозиториев, CI, коммиты, отсутствие секретов в истории."
+  capabilities:
+  - git
+  - github
+  - ci
+  - repo-state
+  - commit
+  - push
+  handlers:
+    status:
+      run: bash /opt/hermes/agents/checks/github-status.sh
+      timeout: 180
+    secret-scan:
+      run: bash /opt/hermes/scripts/secret-scan.sh --worktree
+      timeout: 180
+    identity: {}          # runtime built-in
+    ping: {}          # runtime built-in

@@ -72,3 +72,20 @@ safety:
   output: patch proposal + blast-radius estimate, filed as a kanban task
   rationale: an agent holding both the finding and the fix has no one to argue with (see C1, unfixed for months)
   policy: config/policies/agent-policy.yaml → per_role.security (this block mirrors it; the policy file is authoritative)
+
+# --- agent bus wiring (managed by scripts/wire-agents.sh — do not hand-edit) ---
+bus:
+  agent_id: security
+  purpose: "Безопасность: firewall, выставленные порты, права секретов, обновления, сканирование секретов."
+  capabilities:
+  - security
+  - firewall
+  - secrets
+  - permissions
+  - exposure
+  handlers:
+    audit:
+      run: bash /opt/hermes/agents/checks/security-audit.sh
+      timeout: 180
+    identity: {}          # runtime built-in
+    ping: {}          # runtime built-in

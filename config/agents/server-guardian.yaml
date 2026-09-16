@@ -82,3 +82,27 @@ safety:
   rationale: this box runs 35 octopus units and 20 containers; a restart here is a production change
   policy: config/policies/agent-policy.yaml → per_role.server-guardian (this block mirrors it; the policy file is
     authoritative)
+
+# --- agent bus wiring (managed by scripts/wire-agents.sh — do not hand-edit) ---
+bus:
+  agent_id: server-guardian
+  purpose: "Здоровье узла: systemd, docker, диск, память, загрузка, журнал ошибок."
+  capabilities:
+  - host-health
+  - services
+  - docker
+  - disk
+  - load
+  - journal
+  handlers:
+    status:
+      run: bash /opt/hermes/agents/checks/guardian-status.sh
+      timeout: 180
+    services:
+      run: bash /opt/hermes/agents/checks/guardian-services.sh
+      timeout: 180
+    hermes:
+      run: bash /opt/hermes/agents/checks/hermes-status.sh
+      timeout: 180
+    identity: {}          # runtime built-in
+    ping: {}          # runtime built-in

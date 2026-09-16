@@ -74,3 +74,22 @@ safety:
   - tar -tzf verification of every archive before reporting success
   rationale: a backup job that can read secrets becomes the leak; one that can delete them becomes the disaster
   policy: config/policies/agent-policy.yaml → per_role.backup (this block mirrors it; the policy file is authoritative)
+
+# --- agent bus wiring (managed by scripts/wire-agents.sh — do not hand-edit) ---
+bus:
+  agent_id: backup
+  purpose: "Резервные копии и восстановление: свежесть, целостность, репетиция восстановления."
+  capabilities:
+  - backup
+  - restore
+  - recovery
+  - verify
+  handlers:
+    status:
+      run: bash /opt/hermes/agents/checks/backup-status.sh
+      timeout: 180
+    verify:
+      run: bash /opt/hermes/agents/checks/backup-verify.sh
+      timeout: 180
+    identity: {}          # runtime built-in
+    ping: {}          # runtime built-in

@@ -21,6 +21,7 @@ cache/
 __pycache__/
 *.pyc
 .venv/
+.venv-bus/
 venv/
 node_modules/
 dist/

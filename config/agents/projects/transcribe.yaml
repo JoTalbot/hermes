@@ -72,3 +72,23 @@ identity: 'You are the transcribe project agent of the Hermes OS.
   go to server-guardian; CI/PR mechanics to github; exposure questions to security.
 
   Everything you write to memory is tagged FACT / OBSERVATION / HYPOTHESIS / DECISION / LESSON.'
+
+# --- agent bus wiring (managed by scripts/wire-agents.sh — do not hand-edit) ---
+bus:
+  agent_id: proj-transcribe
+  purpose: "Project agent для transcribe: /opt/orchestrator/projects/transcribe (https://github.com/JoTalbot/transcribe)"
+  capabilities:
+  - project:transcribe
+  - repo-state
+  - service-state
+  handlers:
+    status:
+      run: bash /opt/hermes/agents/checks/project-check.sh
+      timeout: 180
+      env:
+        PROJECT_SLUG: "transcribe"
+        PROJECT_PATH: "/opt/orchestrator/projects/transcribe"
+        PROJECT_REPO: "https://github.com/JoTalbot/transcribe"
+        PROJECT_SERVICE: "jo-agent-transcribe.service octopus-audio-transcribe.service"
+    identity: {}          # runtime built-in
+    ping: {}          # runtime built-in

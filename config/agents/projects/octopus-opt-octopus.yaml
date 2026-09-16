@@ -72,3 +72,23 @@ identity: 'You are the octopus-opt-octopus project agent of the Hermes OS.
   go to server-guardian; CI/PR mechanics to github; exposure questions to security.
 
   Everything you write to memory is tagged FACT / OBSERVATION / HYPOTHESIS / DECISION / LESSON.'
+
+# --- agent bus wiring (managed by scripts/wire-agents.sh — do not hand-edit) ---
+bus:
+  agent_id: proj-octopus-opt-octopus
+  purpose: "Project agent для octopus-opt-octopus: /opt/octopus (https://github.com/JoTalbot/octopus)"
+  capabilities:
+  - project:octopus-opt-octopus
+  - repo-state
+  - container-state
+  handlers:
+    status:
+      run: bash /opt/hermes/agents/checks/project-check.sh
+      timeout: 180
+      env:
+        PROJECT_SLUG: "octopus-opt-octopus"
+        PROJECT_PATH: "/opt/octopus"
+        PROJECT_REPO: "https://github.com/JoTalbot/octopus"
+        PROJECT_CONTAINERS: "octopus octopus-browser-chromium octopus-child-8300 octopus-child-8301"
+    identity: {}          # runtime built-in
+    ping: {}          # runtime built-in

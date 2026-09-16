@@ -72,3 +72,23 @@ identity: 'You are the words project agent of the Hermes OS.
   go to server-guardian; CI/PR mechanics to github; exposure questions to security.
 
   Everything you write to memory is tagged FACT / OBSERVATION / HYPOTHESIS / DECISION / LESSON.'
+
+# --- agent bus wiring (managed by scripts/wire-agents.sh — do not hand-edit) ---
+bus:
+  agent_id: proj-words
+  purpose: "Project agent для words: /home/ubuntu/batch18-oci (https://github.com/JoTalbot/words)"
+  capabilities:
+  - project:words
+  - repo-state
+  - service-state
+  handlers:
+    status:
+      run: bash /opt/hermes/agents/checks/project-check.sh
+      timeout: 180
+      env:
+        PROJECT_SLUG: "words"
+        PROJECT_PATH: "/home/ubuntu/batch18-oci"
+        PROJECT_REPO: "https://github.com/JoTalbot/words"
+        PROJECT_SERVICE: "words-tunnel.service"
+    identity: {}          # runtime built-in
+    ping: {}          # runtime built-in

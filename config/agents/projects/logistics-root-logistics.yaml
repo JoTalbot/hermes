@@ -73,3 +73,23 @@ identity: 'You are the logistics-root-logistics project agent of the Hermes OS.
   go to server-guardian; CI/PR mechanics to github; exposure questions to security.
 
   Everything you write to memory is tagged FACT / OBSERVATION / HYPOTHESIS / DECISION / LESSON.'
+
+# --- agent bus wiring (managed by scripts/wire-agents.sh — do not hand-edit) ---
+bus:
+  agent_id: proj-logistics-root-logistics
+  purpose: "Project agent для logistics-root-logistics: /root/logistics (https://github.com/JoTalbot/logistics)"
+  capabilities:
+  - project:logistics-root-logistics
+  - repo-state
+  - container-state
+  handlers:
+    status:
+      run: bash /opt/hermes/agents/checks/project-check.sh
+      timeout: 180
+      env:
+        PROJECT_SLUG: "logistics-root-logistics"
+        PROJECT_PATH: "/root/logistics"
+        PROJECT_REPO: "https://github.com/JoTalbot/logistics"
+        PROJECT_CONTAINERS: "logistics-collector-collector-1 logistics-collector-enqueuer-1 logistics-collector-normalizer-1 logistics-collector-postgres-1"
+    identity: {}          # runtime built-in
+    ping: {}          # runtime built-in

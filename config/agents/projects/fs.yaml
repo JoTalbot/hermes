@@ -72,3 +72,23 @@ identity: 'You are the fs project agent of the Hermes OS.
   go to server-guardian; CI/PR mechanics to github; exposure questions to security.
 
   Everything you write to memory is tagged FACT / OBSERVATION / HYPOTHESIS / DECISION / LESSON.'
+
+# --- agent bus wiring (managed by scripts/wire-agents.sh — do not hand-edit) ---
+bus:
+  agent_id: proj-fs
+  purpose: "Project agent для fs: /opt/orchestrator/projects/fs (https://github.com/JoTalbot/fs)"
+  capabilities:
+  - project:fs
+  - repo-state
+  - service-state
+  handlers:
+    status:
+      run: bash /opt/hermes/agents/checks/project-check.sh
+      timeout: 180
+      env:
+        PROJECT_SLUG: "fs"
+        PROJECT_PATH: "/opt/orchestrator/projects/fs"
+        PROJECT_REPO: "https://github.com/JoTalbot/fs"
+        PROJECT_SERVICE: "fstrim.service jo-agent-fs.service nfs-common.service"
+    identity: {}          # runtime built-in
+    ping: {}          # runtime built-in

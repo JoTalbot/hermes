@@ -85,6 +85,62 @@ ck "doctor gate numbers contiguous 1..N" "yes" "$( [[ "$maxn" == "$uniqn" ]] && 
 ck "doctor covers the backup gate" "yes" "$( grep -qE '^# 13\. Backups' scripts/doctor.sh && echo yes || echo no )"
 ck "doctor verdict strings present" "SYSTEM HEALTH: HEALTHY" "$(grep -o 'SYSTEM HEALTH: HEALTHY' scripts/doctor.sh)"
 ck "secret scan clean on repo" "clean" "$(bash scripts/secret-scan.sh --worktree)"
+echo "[8] agent bus + agent wiring (static)"
+ck "bus.py compiles" "ok" "$(python3 -m py_compile bus/bus.py && echo ok || echo fail)"
+ck "bus_bridge.py compiles" "ok" "$(python3 -m py_compile bus/bus_bridge.py && echo ok || echo fail)"
+ck "runtime.py compiles" "ok" "$(python3 -m py_compile agents/runtime.py && echo ok || echo fail)"
+ck "agent wiring in sync (scripts/wire-agents.sh --check)" "in sync" \
+   "$(bash scripts/wire-agents.sh --check 2>&1 | tail -1)"
+ck "agent ids unique + capabilities non-empty + a status handler" "ok" "$(
+python3 - <<'PYEOF'
+import glob, sys, yaml
+ids, problems = set(), []
+for f in glob.glob("config/agents/*.yaml") + glob.glob("config/agents/projects/*.yaml"):
+    d = yaml.safe_load(open(f)) or {}
+    b = d.get("bus") or {}
+    aid = b.get("agent_id")
+    if not aid:
+        problems.append(f"{f}: no bus.agent_id"); continue
+    if aid in ids:
+        problems.append(f"{f}: duplicate agent_id {aid}")
+    ids.add(aid)
+    if not b.get("capabilities"):
+        problems.append(f"{aid}: no capabilities")
+    if not b.get("handlers"):
+        problems.append(f"{aid}: no handlers")
+print("ok" if not problems else "; ".join(problems[:4]))
+PYEOF
+)"
+ck "every declared handler script exists" "ok" "$(
+python3 - <<'PYEOF'
+import glob, os, shlex, yaml
+missing = []
+for f in glob.glob("config/agents/*.yaml") + glob.glob("config/agents/projects/*.yaml"):
+    d = yaml.safe_load(open(f)) or {}
+    for name, spec in ((d.get("bus") or {}).get("handlers") or {}).items():
+        if not isinstance(spec, dict) or not spec.get("run"):
+            continue
+        parts = shlex.split(spec["run"])
+        script = next((p for p in parts if p.endswith(".sh")), None)
+        if script and not os.path.exists(script):
+            missing.append(f"{f}:{name}->{script}")
+print("ok" if not missing else "; ".join(missing[:4]))
+PYEOF
+)"
+ck "agent actions stay inside /opt/hermes (no handler runs outside the managed scope)" "ok" "$(
+grep -hE 'run: bash' config/agents/*.yaml config/agents/projects/*.yaml | grep -v '/opt/hermes' | head -3 | \
+  { read -r l && echo "outside: $l" || echo ok; }
+)"
+echo "[9] agent bus: live round trip (skipped when the bus is down)"
+if systemctl is-active --quiet nats-server 2>/dev/null; then
+  if bash tests/bus-selftest.sh >/tmp/bus-selftest.out 2>&1; then
+    ck "live bus selftest" "PASS=10 FAIL=0 WARN=0" "$(grep -o 'PASS=[0-9]* FAIL=[0-9]* WARN=[0-9]*' /tmp/bus-selftest.out | tail -1)"
+  else
+    ck "live bus selftest" "PASS=10 FAIL=0 WARN=0" "$(grep -o 'PASS=[0-9]* FAIL=[0-9]* WARN=[0-9]*' /tmp/bus-selftest.out | tail -1) $(tail -3 /tmp/bus-selftest.out | tr '\n' ' ')"
+  fi
+else
+  SKIP=$((SKIP+1)); echo "  SKIP  nats-server is not running on this host"
+fi
 echo
 echo "════ $PASS passed · $FAIL failed · $SKIP skipped ════"
 [[ $FAIL -eq 0 ]]

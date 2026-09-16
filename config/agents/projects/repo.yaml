@@ -72,3 +72,23 @@ identity: 'You are the repo project agent of the Hermes OS.
   go to server-guardian; CI/PR mechanics to github; exposure questions to security.
 
   Everything you write to memory is tagged FACT / OBSERVATION / HYPOTHESIS / DECISION / LESSON.'
+
+# --- agent bus wiring (managed by scripts/wire-agents.sh — do not hand-edit) ---
+bus:
+  agent_id: proj-repo
+  purpose: "Project agent для repo: /root/agents/-Octopus/repo (https://github.com/JoTalbot/repo)"
+  capabilities:
+  - project:repo
+  - repo-state
+  - service-state
+  handlers:
+    status:
+      run: bash /opt/hermes/agents/checks/project-check.sh
+      timeout: 180
+      env:
+        PROJECT_SLUG: "repo"
+        PROJECT_PATH: "/root/agents/-Octopus/repo"
+        PROJECT_REPO: "https://github.com/JoTalbot/repo"
+        PROJECT_SERVICE: "apport-autoreport.service octopus-tg-registry-report.service"
+    identity: {}          # runtime built-in
+    ping: {}          # runtime built-in
