@@ -83,7 +83,10 @@ agent (profile)
 - **FACT** INFO-level gateway lines go to `$HERMES_HOME/logs/gateway.log`, not journald. When
   something "didn't happen", read the file before assuming it did not.
 
-## 5. The agent bus is `hermes kanban`
+## 5. The agent bus is `hermes kanban` (LOCAL layer — see §10 for the distributed layer)
+
+> UPDATE 2026-09-16: the bus is now TWO layers. The kanban board remains the durable local
+> mirror/history of every node; cross-node transport is NATS JetStream. §10 has the rules.
 
 - **DECISION** No bespoke message bus. Hermes ships a durable SQLite board with atomic claims,
   dependencies, comments, attachments and a dispatcher daemon, shared across profiles. A second
@@ -239,3 +242,44 @@ agent (profile)
   `... | tail -1` yields an empty string and any check built on it reports "could not query" on a healthy
   system. Read the summary line by content (`grep -E 'hub-installed'`). A verification that fails on
   success is worse than no verification — the same failure mode as the `backup.sh` false "verified".
+
+## 10. Distributed Agent Bus + agents (added 2026-09-16)
+
+**Two layers, both required.** NATS 2.10 + JetStream (`hermes.>`, stream `AGENT_BUS`, 7-day
+window, file storage) is the transport: fan-out, DM, request/reply, replay for a node that
+was offline. The kanban board `agents-chat` is the durable local mirror and history: one room
+per channel, one comment per message, readable with no bus and shown in the dashboard's
+Kanban tab.
+
+* Subjects: `hermes.chat.<channel>.<priority>`, `hermes.dm.<agent>.<priority>`,
+  `hermesrpc.rpc.<agent>` (RPC is OUTSIDE the stream — inside it, the server's PubAck answers
+  the request and beats the real agent), `hermes.node.register` (a join announcement).
+* Channels: general, orchestrator, server, github, security, monitoring, projects, incidents,
+  knowledge. Kinds: event/decision/task/result/error/status/request/reply. Priorities:
+  low/normal/high/urgent (priority rides in the subject).
+* Token: `/etc/hermes/nats.env` (0600). NATS binds 0.0.0.0 but ufw allows 4222 only from
+  100.64.0.0/10 (tailnet), 10.0.0.0/24 and 172.17.0.0/16 (docker nodes).
+* One durable consumer per node (`node-<server_id>`) = offline replay. Ack only after the
+  message is durable locally, so a dead board delays a message instead of losing it.
+* Agents: `agents/runtime.py` hosts every local agent (systemd `hermes-agents`, or
+  `deploy/nosystemd/ctl.sh` where systemd is absent). An agent can ONLY run handlers declared
+  in `config/agents/*.yaml` → `bus.handlers`: a message names a handler, never a shell command.
+  `scripts/wire-agents.sh` owns that block (idempotent; `--check` for drift). 27 agents wired.
+* Routing: the orchestrator picks a target by capability, sends a task with a
+  `correlation_id`, and rolls the result up when it arrives. Agents therefore talk to each
+  other through one bus — there is no mesh of direct agent-to-agent links.
+* Peer nodes are real: `node-arm-02` (srv-c6faaa05) and `node-arm-03` (srv-88534e5c) are
+  containers that were built from GitHub by `scripts/bootstrap.sh --no-systemd`. Their agents
+  are node-scoped (`node-arm-02/server-guardian`) so a role is not an identity; their role is
+  persisted in `/etc/hermes/node.env`.
+* Health: `hermes-bus digest` (one screen, all channels), `hermes-bus-bridge status`,
+  `tests/bus-selftest.sh` (10 checks), `tests/federation-selftest.sh` (10 checks across two
+  nodes), doctor gates 14-17.
+
+### Hard rules that came out of real failures
+* Never put RPC inside the JetStream subject space (PubAck hijack).
+* Ack only after local durability; wrap the callback so a poison message cannot loop forever.
+* A node's role belongs in a FILE (`/etc/hermes/node.env`), not in the shell that started it.
+* Do not run `hermes gateway restart --system` casually: it regenerates the unit and once
+  pointed it at another operator's venv (203/EXEC). The drop-in pins it; doctor gate 17 checks.
+* An untested restore is a story: rehearsals must count what came back.

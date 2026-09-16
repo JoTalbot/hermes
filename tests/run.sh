@@ -4,7 +4,11 @@
 # balancer's MEASURED contract (422-on-missing-goal included). If the shim drifts from the
 # real API shape, these tests go red — which is the point.
 set -uo pipefail
-cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# Resolve the repo root from THIS file. Relying on `git rev-parse` meant that running the
+# suite by absolute path from another directory (e.g. `bash /opt/hermes/tests/run.sh` out of
+# /root) turned every gate into "no such file" — 25 red lines that described the caller's
+# cwd, not the code.
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PASS=0; FAIL=0; SKIP=0
 ck(){ local name="$1" want="$2" got="$3"
   if [[ "$got" == *"$want"* ]]; then echo "  ok   $name"; PASS=$((PASS+1))

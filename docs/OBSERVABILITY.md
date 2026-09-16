@@ -79,3 +79,22 @@ truthfully without ever holding the credential.
 (FACT/OBSERVATION/HYPOTHESIS/DECISION/LESSON) vocabulary as the knowledge base.
 `scripts/seed-memory.sh` folds the machine-wide knowledge base into each profile's
 `memories/MEMORY.md`, which is the file Hermes actually reads at the start of a turn.
+## Measured 2026-09-16 — the bus, the agents and the peers are observable
+
+Exporter `scripts/hermes_metrics_exporter.py` (job `hermes_os_exporter`, :9725) gained:
+`hermes_bus_up`, `hermes_bus_connections`, `hermes_bus_stream_messages`,
+`hermes_bus_stream_bytes`, `hermes_bus_consumer_ack_pending`, `hermes_agents_defined`,
+`hermes_agents_handlers_total`, `hermes_agents_runtime_up`,
+`hermes_agents_dispatched_pending`, `hermes_nodes_known`,
+`hermes_node_messages_total{node}`, `hermes_projects_wired`,
+`hermes_project_path_present{project}`, `hermes_project_dirty{project}`.
+
+`deploy/monitoring/hermes-agents.rules.yml` (8 alerts, loaded by the existing Prometheus):
+bus down, agents runtime down, consumer backlog >50/10m, dispatch stuck >5/30m, project tree
+missing, dirty burst, unpushed config, node silent 24h.
+`deploy/monitoring/hermes-agents-dashboard.json` — Grafana dashboard "Hermes Agent Bus &
+Agents" (12 panels). Install/refresh: `bash scripts/install-monitoring.sh` (backs up what it
+replaces, SIGHUP-reloads Prometheus, never edits existing rules or dashboards).
+
+Doctor gates 14-17 close the loop: transport, agents (including a real request to a live
+agent), federation freshness, and gateway-unit integrity.

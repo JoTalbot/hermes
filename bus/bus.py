@@ -214,13 +214,21 @@ def _room_cache_put(channel: str, tid: str) -> None:
     (STATE_DIR / "rooms.json").write_text(json.dumps(c, indent=2))
 
 
-def room_task_id(channel: str) -> str | None:
+def _room_cache_drop(channel: str) -> None:
+    c = _room_cache()
+    if channel in c:
+        del c[channel]
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        (STATE_DIR / "rooms.json").write_text(json.dumps(c, indent=2))
+
+
+def room_task_id(channel: str, refresh: bool = False) -> str | None:
     """Resolve/create the room task for a channel.
 
     The id is stable via --idempotency-key, so creating again is safe; the cache only
     exists to keep the hot path (one message) to a single hermes CLI call.
     """
-    cached = _room_cache().get(channel)
+    cached = None if refresh else _room_cache().get(channel)
     if cached:
         return cached
     cp = _as_hermes([HERMES_BIN, "kanban", "--board", BOARD, "create", f"room: {channel}",
@@ -252,6 +260,12 @@ def mirror_line(env: dict) -> str:
     return body
 
 
+def log_mirror_error(channel: str, cp) -> None:
+    """Print why a mirror failed. Silence here cost an hour of guessing."""
+    err = " ".join((cp.stderr or cp.stdout or "").strip().split())[:300]
+    print(f"[bus] mirror failed for #{channel}: exit={cp.returncode} {err}", flush=True)
+
+
 def mirror_local(env: dict) -> bool:
     """Write the message into the local durable board — exactly once per node.
 
@@ -277,8 +291,19 @@ def mirror_local(env: dict) -> bool:
             return False
         cp = _as_hermes([HERMES_BIN, "kanban", "--board", BOARD, "comment", tid,
                          mirror_line(env), "--author", env["from"]])
+        if cp.returncode != 0:
+            # The cached room id can be stale (board rebuilt, restored from another archive,
+            # room deleted). A stale cache made EVERY message fail to mirror while the log
+            # only said "board busy?" — so drop the cache and re-resolve once.
+            _room_cache_drop(channel)
+            tid = room_task_id(channel, refresh=True)
+            if tid:
+                cp = _as_hermes([HERMES_BIN, "kanban", "--board", BOARD, "comment", tid,
+                                 mirror_line(env), "--author", env["from"]])
         if cp.returncode == 0 and mid:
             _ledger_add(mid)
+        elif cp.returncode != 0:
+            log_mirror_error(channel, cp)
         return cp.returncode == 0
 
 

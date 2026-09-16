@@ -86,10 +86,10 @@ bus:
   - verify
   handlers:
     status:
-      run: bash /opt/hermes/agents/checks/backup-status.sh
+      run: bash /home/user/hermes-work/clone/agents/checks/backup-status.sh
       timeout: 180
     verify:
-      run: bash /opt/hermes/agents/checks/backup-verify.sh
+      run: bash /home/user/hermes-work/clone/agents/checks/backup-verify.sh
       timeout: 180
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

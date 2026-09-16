@@ -44,3 +44,16 @@ multi-server dashboard today is reading a diagram, not a system.
 Two prerequisites before a second node is worth adding: the balancer has no authentication (fine on
 loopback, unacceptable across a VPN), and C1 in SECURITY.md means local code execution as root is
 available to any user on this box — which is a poor place to put a central control plane.
+## Measured 2026-09-16 — the federation is real, not a diagram
+
+| node | id | kind | agents | how it was built |
+|---|---|---|---|---|
+| arm-server-01 | srv-oci-arm-01 | bare metal (OCI ARM) | 27 (6 core + 21 project) | the primary |
+| node-arm-02 | srv-c6faaa05 | container (Ubuntu 24.04) | 6 node-scoped | `bootstrap.sh --no-systemd` from GitHub |
+| node-arm-03 | srv-88534e5c | container, thrown away and rebuilt | 6 node-scoped | same path, as a recovery drill |
+
+Proven by `tests/federation-selftest.sh` (10/10, run against both peers): the peer's agent
+answers the primary; the primary's agent answers the peer; a peer broadcast lands in the
+primary's durable local history; a message published while a peer was down is delivered on
+reconnect; the peer keeps serving with the primary's runtime stopped and its local board
+intact. A new server needs only the repo URL and `NATS_TOKEN` — no per-node hand configuration.

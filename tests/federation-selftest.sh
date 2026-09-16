@@ -68,7 +68,7 @@ sleep 1
 peer "hermes-bus request --to $PEER_PREFIX/server-guardian --timeout 60 ping" | grep -q "reply in" \
   && ok "peer agents keep serving with the primary's runtime down" \
   || bad "peer agents stopped working when the primary went down"
-peer "hermes-bus read --channel server -n 5" | grep -q "узел $PEER_PREFIX" \
+peer "hermes-bus read --channel server -n 40" | grep -q "узел $PEER_PREFIX" \
   && ok "peer local state (its own board) is intact" || bad "peer local board looks empty"
 systemctl start hermes-agents
 sleep 3

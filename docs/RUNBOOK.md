@@ -249,3 +249,40 @@ as someone cleaned it; a venv or image that dies mid-write at ENOSPC is far wors
 | cron restart of `octopus-devpanel.service` | "Unit not found" every 2 min | timer for a removed unit |
 | `logistics-recurring-demand-scheduler-1` | `Exited (1) 23 hours ago` | pre-existing; not Hermes' |
 | `/root/agents/-Octopus/repo` | `fatal: not a git repository` | `.git/HEAD` missing, objects intact |
+
+## Agent Bus + agents (2026-09-16)
+
+```bash
+# state
+hermes-bus channels | nodes | digest -n 5          # rooms, federation members, one-screen chat
+hermes-bus-bridge status                           # stream size + per-node consumer backlog
+systemctl status nats-server hermes-bus-bridge hermes-agents
+journalctl -u hermes-agents -n 50 -o cat           # what agents did
+
+# talk
+hermes-bus post --channel incidents --kind error --priority urgent "текст"
+hermes-bus request --to server-guardian --timeout 60 status
+hermes-bus dm --to github-agent --kind task "проверь репозиторий"
+
+# a new capability for an agent (never hand-edit the YAML block)
+sudo bash scripts/wire-agents.sh && sudo systemctl restart hermes-agents
+
+# tests that actually exercise the bus
+sudo bash tests/bus-selftest.sh                    # 10 checks, single node
+sudo NODE2=hermes-node-02 bash tests/federation-selftest.sh   # 10 checks, two nodes
+
+# if the bus looks dead
+curl -s http://127.0.0.1:8222/healthz               # nats itself
+systemctl restart nats-server hermes-bus-bridge hermes-agents
+hermes-bus-bridge discover                          # (Telegram) find a chat to talk to
+
+# join a new node (container/VM): only the repo URL and NATS_TOKEN travel
+git clone https://github.com/JoTalbot/hermes && cd hermes && sudo ./scripts/bootstrap.sh --no-systemd
+```
+
+**Telegram (Global Chat on the phone):** a BOT cannot create a group and cannot start a DM.
+Once a human sends `/start` to @OctopusSwwarmBot (or adds it to a group), run
+`hermes-bus-bridge discover`; the bridge then forwards meaningful bus messages (kinds
+event/decision/task/result/error/status, priority != low, max 20/min, only messages this
+node authored so N nodes do not send N copies). Forum groups can map channels to topics via
+`/etc/hermes/telegram.chats.json`.

@@ -96,13 +96,13 @@ bus:
   - journal
   handlers:
     status:
-      run: bash /opt/hermes/agents/checks/guardian-status.sh
+      run: bash /home/user/hermes-work/clone/agents/checks/guardian-status.sh
       timeout: 180
     services:
-      run: bash /opt/hermes/agents/checks/guardian-services.sh
+      run: bash /home/user/hermes-work/clone/agents/checks/guardian-services.sh
       timeout: 180
     hermes:
-      run: bash /opt/hermes/agents/checks/hermes-status.sh
+      run: bash /home/user/hermes-work/clone/agents/checks/hermes-status.sh
       timeout: 180
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

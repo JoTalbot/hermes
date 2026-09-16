@@ -172,13 +172,17 @@ def tg_discover(as_json: bool = False) -> int:
 
 # ── node bookkeeping ────────────────────────────────────────────────────────
 def note_node(env: dict) -> None:
+    # Messages from hand-made envelopes (debug probes) have no node field. Registering them
+    # as "unknown" put a phantom peer in `hermes-bus nodes` and in the doctor's federation count.
+    if not env.get("node"):
+        return
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     p = STATE_DIR / "nodes.json"
     try:
         nodes = json.loads(p.read_text()) if p.exists() else {}
     except Exception:
         nodes = {}
-    key = env.get("node") or "unknown"
+    key = env["node"]
     entry = nodes.get(key, {"node": key, "server": env.get("server"), "msgs": 0})
     entry.update({"last_seen": env.get("ts") or datetime.now(timezone.utc).isoformat(),
                   "msgs": int(entry.get("msgs", 0)) + 1})
