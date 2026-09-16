@@ -85,7 +85,7 @@ bus:
   - exposure
   handlers:
     audit:
-      run: bash /home/user/hermes-work/clone/agents/checks/security-audit.sh
+      run: bash /opt/hermes/agents/checks/security-audit.sh
       timeout: 180
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

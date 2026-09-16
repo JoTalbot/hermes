@@ -87,10 +87,10 @@ bus:
   - push
   handlers:
     status:
-      run: bash /home/user/hermes-work/clone/agents/checks/github-status.sh
+      run: bash /opt/hermes/agents/checks/github-status.sh
       timeout: 180
     secret-scan:
-      run: bash /home/user/hermes-work/clone/tests/secret-scan.sh --worktree
+      run: bash /opt/hermes/scripts/secret-scan.sh --worktree
       timeout: 180
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

@@ -82,7 +82,7 @@ bus:
   - planning
   handlers:
     status:
-      run: bash /home/user/hermes-work/clone/agents/checks/orchestrator-status.sh
+      run: bash /opt/hermes/agents/checks/orchestrator-status.sh
       timeout: 180
     dispatch: {}          # runtime built-in
     agents: {}          # runtime built-in

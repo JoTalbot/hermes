@@ -81,7 +81,7 @@ bus:
   - alerts
   handlers:
     health:
-      run: bash /home/user/hermes-work/clone/agents/checks/monitoring-health.sh
+      run: bash /opt/hermes/agents/checks/monitoring-health.sh
       timeout: 180
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in
