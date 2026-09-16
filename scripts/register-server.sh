@@ -39,4 +39,17 @@ if git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   git -C "$REPO_DIR" add "config/servers/$(basename "$out")"
   git -C "$REPO_DIR" diff --cached --quiet || { git -C "$REPO_DIR" commit -q -m "chore(register): update $host manifest" && echo "committed (push with scripts/push.sh)"; }
 fi
+# --- announce on the bus so the federation sees the new node immediately -----------
+# Registration is not just a file in Git: the node says hello on the shared bus with its
+# measured capabilities, and every other node mirrors that into its local #server room.
+if command -v hermes-bus >/dev/null 2>&1 && [[ -s /etc/hermes/nats.env ]]; then
+  agents_n=$(ls "$REPO_DIR/config/agents"/*.yaml 2>/dev/null | wc -l)
+  skills_n=$(ls -d "$REPO_DIR"/skills/*/ 2>/dev/null | wc -l)
+  hermes-bus post --channel server --kind event --priority high \
+    "узел зарегистрирован: ${host} (${sid}) — os=$(. /etc/os-release; echo "$PRETTY_NAME") arch=$(uname -m) cpu=$(nproc) mem=$(awk '/MemTotal/{printf "%d", $2/1048576}' /proc/meminfo)Gi agents=${agents_n} skills=${skills_n}" \
+    --ref "$out" >/dev/null 2>&1 && echo "announced on the agent bus (#server)" \
+    || echo "bus announcement skipped (bus unreachable) — node is registered locally"
+else
+  echo "bus announcement skipped (no hermes-bus / nats.env yet)"
+fi
 echo "manifest: $out"

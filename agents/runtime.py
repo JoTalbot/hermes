@@ -155,6 +155,14 @@ class Agent:
 
 
 def load_agents() -> dict[str, Agent]:
+    """Load the agents this NODE runs.
+
+    HERMES_LOCAL_AGENTS limits the set — "all" (default), "core" (the six specialists), or
+    a comma-separated list of ids. A container node has no project checkouts, so running 21
+    project agents there would be 21 agents reporting "path missing" and nothing else.
+    """
+    import os as _os
+    only = (_os.environ.get("HERMES_LOCAL_AGENTS") or "all").strip().lower()
     agents: dict[str, Agent] = {}
     paths = sorted(CONFIG_DIR.glob("*.yaml")) + sorted(PROJECT_AGENTS_DIR.glob("*.yaml"))
     for p in paths:
@@ -162,6 +170,10 @@ def load_agents() -> dict[str, Agent]:
             a = Agent(p)
         except Exception as e:
             log(f"skipping {p.name}: {e}")
+            continue
+        if only == "core" and a.kind != "core":
+            continue
+        if only not in ("all", "core") and a.id not in [x.strip() for x in only.split(",")]:
             continue
         if a.id in agents:
             log(f"duplicate agent id {a.id} ({p.name}) — keeping the first")

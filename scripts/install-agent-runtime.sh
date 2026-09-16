@@ -21,13 +21,21 @@ echo "=== 2. runtime install ==="
 "$VENV/bin/pip" install --quiet --disable-pip-version-check PyYAML 2>&1 | tail -1 || true
 "$VENV/bin/python" -c "import yaml; print('  PyYAML', yaml.__version__)"
 install -d -m 0755 /var/lib/hermes-agents /var/lib/hermes-agents/logs
-install -m 0644 "$REPO_DIR/deploy/systemd/hermes-agents.service" /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable hermes-agents >/dev/null 2>&1
-systemctl restart hermes-agents
-sleep 4
-echo "  active: $(systemctl is-active hermes-agents)"
-journalctl -u hermes-agents --since -1min --no-pager -o cat | tail -4 | sed 's/^/  /'
+NOSYSTEMD="${NOSYSTEMD:-0}"
+[[ "${1:-}" == "--no-systemd" ]] && NOSYSTEMD=1
+if [[ "$NOSYSTEMD" == "1" ]]; then
+  install -d -m 0755 "$REPO_DIR/deploy/nosystemd"
+  install -m 0755 "$REPO_DIR/deploy/nosystemd/ctl.sh" "$REPO_DIR/deploy/nosystemd/ctl.sh"
+  bash "$REPO_DIR/deploy/nosystemd/ctl.sh" restart agents
+else
+  install -m 0644 "$REPO_DIR/deploy/systemd/hermes-agents.service" /etc/systemd/system/
+  systemctl daemon-reload
+  systemctl enable hermes-agents >/dev/null 2>&1
+  systemctl restart hermes-agents
+  sleep 4
+  echo "  active: $(systemctl is-active hermes-agents)"
+  journalctl -u hermes-agents --since -1min --no-pager -o cat | tail -4 | sed 's/^/  /'
+fi
 
 echo "=== 3. registry ==="
 "$VENV/bin/python" "$REPO_DIR/agents/runtime.py" list | head -12

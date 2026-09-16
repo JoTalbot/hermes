@@ -46,14 +46,24 @@ WRAP
 chmod 0755 /usr/local/bin/hermes-bus-bridge
 
 echo "=== 4. bridge daemon ==="
-install -d -m 0755 /etc/systemd/system 2>/dev/null || true
-install -m 0644 "$SRC/deploy/systemd/hermes-bus-bridge.service" /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable hermes-bus-bridge >/dev/null 2>&1
-systemctl restart hermes-bus-bridge
-sleep 4
-echo "  active: $(systemctl is-active hermes-bus-bridge)"
-journalctl -u hermes-bus-bridge --since -1min --no-pager -o cat 2>/dev/null | tail -4 | sed 's/^/  /'
+NOSYSTEMD="${NOSYSTEMD:-0}"
+[[ "${1:-}" == "--no-systemd" ]] && NOSYSTEMD=1
+if [[ "$NOSYSTEMD" == "1" ]]; then
+  # Containers and rescue shells have no PID 1 systemd; the very same daemon runs under
+  # a PID-file supervisor so that "add a node" is not a special build.
+  install -d -m 0755 /opt/hermes/deploy/nosystemd
+  install -m 0755 "$SRC/deploy/nosystemd/ctl.sh" /opt/hermes/deploy/nosystemd/ctl.sh
+  bash /opt/hermes/deploy/nosystemd/ctl.sh restart bus-bridge
+else
+  install -d -m 0755 /etc/systemd/system 2>/dev/null || true
+  install -m 0644 "$SRC/deploy/systemd/hermes-bus-bridge.service" /etc/systemd/system/
+  systemctl daemon-reload
+  systemctl enable hermes-bus-bridge >/dev/null 2>&1
+  systemctl restart hermes-bus-bridge
+  sleep 4
+  echo "  active: $(systemctl is-active hermes-bus-bridge)"
+  journalctl -u hermes-bus-bridge --since -1min --no-pager -o cat 2>/dev/null | tail -4 | sed 's/^/  /'
+fi
 
 echo "=== 5. selftest: bus reachable + stream + CLI round trip ==="
 NATS_TOKEN="$(sed -n 's/^NATS_TOKEN=//p' /etc/hermes/nats.env)"

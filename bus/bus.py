@@ -58,8 +58,10 @@ KINDS = ["event", "decision", "task", "result", "error", "status", "request", "r
 PRIORITIES = ["low", "normal", "high", "urgent"]
 
 BOARD = "agents-chat"
-HERMES_HOME = "/home/hermes/.hermes"
-HERMES_BIN = "/home/hermes/.hermes-venv/bin/hermes"
+# Both are overridable so the same bus code runs on a node where Hermes lives elsewhere
+# (e.g. a container node with its own HERMES_HOME) instead of forking the code path.
+HERMES_HOME = os.environ.get("HERMES_HOME", "/home/hermes/.hermes")
+HERMES_BIN = os.environ.get("HERMES_BIN", "/home/hermes/.hermes-venv/bin/hermes")
 NATS_ENV = "/etc/hermes/nats.env"
 STATE_DIR = Path("/var/lib/hermes-bus")
 SUBJECT_PREFIX = "hermes"
@@ -146,13 +148,19 @@ def subject_for(env: dict) -> str:
 
 # ── local durable mirror (kanban board agents-chat) ─────────────────────────
 def _as_hermes(cmd: list[str], timeout: int = 45) -> subprocess.CompletedProcess:
-    """Run a hermes CLI call as the hermes user (HERMES_HOME is 0700 hermes:hermes)."""
-    if os.geteuid() == 0 and os.environ.get("USER") != "hermes":
+    """Run a hermes CLI call.
+
+    On arm-server-01 the daemon runs as root while the board is 0700 hermes:hermes, so the
+    call is wrapped in `sudo -u hermes`. When HERMES_HOME is set explicitly (a container
+    node, a test harness, another operator's home) the caller has already decided whose
+    home it is, and sudo would fight that decision.
+    """
+    explicit_home = "HERMES_HOME" in os.environ
+    if os.geteuid() == 0 and not explicit_home and os.environ.get("USER") != "hermes":
         cmd = ["sudo", "-u", "hermes", "-H", "env", f"HERMES_HOME={HERMES_HOME}"] + cmd
-    else:
-        env = dict(os.environ, HERMES_HOME=HERMES_HOME)
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    env = dict(os.environ, HERMES_HOME=HERMES_HOME)
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
 
 
 def _ledger_path() -> Path:
