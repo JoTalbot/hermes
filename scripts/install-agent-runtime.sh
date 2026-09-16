@@ -7,6 +7,15 @@
 #
 #   sudo bash /opt/hermes/scripts/install-agent-runtime.sh
 set -euo pipefail
+# `install` refuses to copy a file onto itself, and that is the NORMAL case when the repo
+# lives at the install target (/opt/hermes). Every self-copy goes through this helper.
+place() { local src="$1" dst="$2" mode="${3:-0644}"
+  if [[ "$(readlink -f "$src")" == "$(readlink -f "$dst" 2>/dev/null || echo -)" ]]; then
+    return 0
+  fi
+  install -m "$mode" "$src" "$dst"
+}
+
 REPO_DIR="${REPO_DIR:-/opt/hermes}"
 VENV=/opt/hermes/.venv-bus
 export PYTHONPATH="$REPO_DIR"
@@ -25,10 +34,10 @@ NOSYSTEMD="${NOSYSTEMD:-0}"
 [[ "${1:-}" == "--no-systemd" ]] && NOSYSTEMD=1
 if [[ "$NOSYSTEMD" == "1" ]]; then
   install -d -m 0755 "$REPO_DIR/deploy/nosystemd"
-  install -m 0755 "$REPO_DIR/deploy/nosystemd/ctl.sh" "$REPO_DIR/deploy/nosystemd/ctl.sh"
+  place "$REPO_DIR/deploy/nosystemd/ctl.sh" "$REPO_DIR/deploy/nosystemd/ctl.sh" 0755
   bash "$REPO_DIR/deploy/nosystemd/ctl.sh" restart agents
 else
-  install -m 0644 "$REPO_DIR/deploy/systemd/hermes-agents.service" /etc/systemd/system/
+  place "$REPO_DIR/deploy/systemd/hermes-agents.service" /etc/systemd/system/hermes-agents.service 0644
   systemctl daemon-reload
   systemctl enable hermes-agents >/dev/null 2>&1
   systemctl restart hermes-agents
@@ -42,8 +51,9 @@ echo "=== 3. registry ==="
 
 echo "=== 4. selftest: local handler, then over the bus ==="
 "$VENV/bin/python" "$REPO_DIR/agents/runtime.py" invoke server-guardian identity | head -6 | sed 's/^/  /'
-echo "  --- bus request: hermes-bus request --to server-guardian 'status' ---"
-if hermes-bus request --to server-guardian --timeout 90 "status" 2>&1 | head -8 | sed 's/^/  /'; then
+FIRST_AGENT="$(HERMES_LOCAL_AGENTS="${HERMES_LOCAL_AGENTS:-all}" "$VENV/bin/python" "$REPO_DIR/agents/runtime.py" list 2>/dev/null | sed -n '2p' | awk '{print $3}')"
+echo "  --- bus request: hermes-bus request --to $FIRST_AGENT 'ping' ---"
+if hermes-bus request --to "${FIRST_AGENT:-server-guardian}" --timeout 90 "ping" 2>&1 | head -8 | sed 's/^/  /'; then
   echo "  bus → agent → bus: OK"
 else
   echo "  bus → agent round trip FAILED (see journalctl -u hermes-agents)"

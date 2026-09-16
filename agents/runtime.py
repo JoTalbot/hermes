@@ -120,14 +120,23 @@ def load_yaml(path: Path) -> dict:
 
 
 # ── agent registry ──────────────────────────────────────────────────────────
+# Two nodes run the same six specialists. A role is not an identity: `server-guardian`
+# exists on every node, so the *bus* id of an agent on a secondary node is prefixed with
+# that node's server_id. The primary node keeps bare names for backwards compatibility and
+# because its agents are the ones a human types by hand.
+SCOPE = (os.environ.get("HERMES_AGENT_SCOPE") or "local").lower()
+
+
 class Agent:
     def __init__(self, path: Path):
         self.path = path
         cfg = load_yaml(path)
         prof = cfg.get("profile") or {}
         bus = cfg.get("bus") or {}
-        self.id = bus.get("agent_id") or prof.get("slug") or path.stem
         self.slug = prof.get("slug") or path.stem
+        base_id = bus.get("agent_id") or self.slug
+        self.local_id = base_id
+        self.id = f"{server_id()}/{base_id}" if SCOPE == "node" else base_id
         self.description = (bus.get("purpose") or prof.get("description") or "").strip()
         self.kind = "project" if path.parent.name == "projects" else "core"
         self.capabilities = bus.get("capabilities") or []
@@ -201,7 +210,11 @@ def run_handler(agent: Agent, handler: str, args: dict, actor: str) -> dict:
     # Static per-handler environment from the agent's YAML (project path, service name…).
     env.update({str(k): str(v) for k, v in (spec.get("env") or {}).items() if v is not None})
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    logfile = LOG_DIR / f"{agent.id}-{handler}-{int(time.time())}.log"
+    # Agent ids from a peer node look like "<server_id>/<role>" — a slash in a filename is
+    # a directory separator, so the log write failed with FileNotFoundError instead of
+    # writing the log. Sanitise, keep the id readable.
+    safe_id = agent.id.replace("/", "_")
+    logfile = LOG_DIR / f"{safe_id}-{handler}-{int(time.time())}.log"
     started = time.time()
     try:
         cp = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True,
@@ -448,6 +461,15 @@ class Runtime:
 
                 for agent in self.agents.values():
                     await self.subscribe_agent(nc, agent)
+
+                # Roster announcement: the federation learns which capabilities this node
+                # offers, so routing can pick a node instead of guessing.
+                roster = {a.id: {"kind": a.kind, "capabilities": a.capabilities,
+                                 "handlers": a.handler_names()} for a in self.agents.values()}
+                await self.publish(nc, channel="server", kind="status",
+                                   text=f"узел {server_id()} на шине: агентов {len(roster)} "
+                                        f"({', '.join(sorted(roster))[:400]})",
+                                   agent="orchestrator")
 
                 async def status_watch():
                     while True:

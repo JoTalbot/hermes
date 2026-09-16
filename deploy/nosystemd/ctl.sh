@@ -10,6 +10,15 @@
 set -uo pipefail
 
 service="${2:-}"; action="${1:-status}"
+
+# Node role lives in a file, not in the shell that happened to start the daemon. Without
+# this, restarting the peer's agents through `docker exec` silently dropped
+# HERMES_AGENT_SCOPE=node, the peer's agents took the PRIMARY's bare names, and two nodes
+# started answering to the same address.
+if [[ -f /etc/hermes/node.env ]]; then
+  # shellcheck disable=SC1091
+  . /etc/hermes/node.env
+fi
 case "$service" in
   bus-bridge) CMD=(/opt/hermes/.venv-bus/bin/python /opt/hermes/bus/bus_bridge.py run --rpc-echo) ;;
   agents)     CMD=(/opt/hermes/.venv-bus/bin/python /opt/hermes/agents/runtime.py run) ;;
@@ -35,8 +44,9 @@ stop() {
   if ! running; then echo "$service not running"; rm -f "$PIDFILE"; return 0; fi
   local pid; pid="$(cat "$PIDFILE")"
   kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
-  for _ in $(seq 1 10); do running || break; sleep 1; done
-  running && { kill -KILL "$pid" 2>/dev/null; echo "$service force-killed"; } || echo "$service stopped"
+  for _ in $(seq 1 15); do running || break; sleep 1; done
+  if running; then kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null
+    echo "$service force-killed after 15s"; else echo "$service stopped"; fi
   rm -f "$PIDFILE"
 }
 

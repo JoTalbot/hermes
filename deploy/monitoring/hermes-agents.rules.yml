@@ -1,0 +1,90 @@
+# Alert rules for the Hermes agent OS (bus, agents, federation, projects).
+#
+# Added 2026-09-16 together with the distributed Agent Bus. Before this, Prometheus knew
+# nothing about the bus, the agents or the peer nodes, so no alert could fire for any of
+# them. Every expression below is backed by a metric the Hermes exporter was verified to
+# emit (scripts/hermes_metrics_exporter.py, job hermes_os_exporter).
+groups:
+  - name: hermes_agent_bus
+    rules:
+      - alert: HermesBusDown
+        expr: hermes_bus_up == 0 or up{job="hermes_os_exporter"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Agent Bus is not reachable"
+          description: "nats-server does not answer /varz on 127.0.0.1:8222 (or the Hermes
+            exporter itself is down). Cross-node messages are not flowing: agents on this
+            node can still work locally, but nothing leaves the host."
+
+      - alert: HermesAgentsRuntimeDown
+        expr: hermes_agents_runtime_up == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Hermes agents runtime is down"
+          description: "No process is attached to hermes.dm.* / hermesrpc.*. Tasks sent to
+            any agent on this node will time out."
+
+      - alert: HermesBusBacklog
+        expr: hermes_bus_consumer_ack_pending > 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "This node is not consuming its bus stream"
+          description: "ack_pending > 50 for 10 minutes: the durable consumer is not
+            acknowledging messages, so the node is silently falling behind (a stuck local
+            mirror or a hung handler)."
+
+      - alert: HermesAgentDispatchStuck
+        expr: hermes_agents_dispatched_pending > 5
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Dispatched tasks are not completing"
+          description: "The orchestrator is waiting for more than 5 results for 30 minutes —
+            a delegated agent is not answering."
+
+      - alert: HermesProjectTreeMissing
+        expr: hermes_project_path_present == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A project agent points at a path that does not exist"
+          description: "Project {{ $labels.project }} has no checkout on this node. Either
+            the project moved (fix the profile) or the agent should not be wired here."
+
+      - alert: HermesProjectDirtyBurst
+        expr: hermes_project_dirty > 30
+        for: 2h
+        labels:
+          severity: info
+        annotations:
+          summary: "Project {{ $labels.project }} has many uncommitted paths"
+          description: "More than 30 modified/untracked paths for 2 hours. Not necessarily
+            wrong — but uncommitted work is not covered by the recovery story."
+
+      - alert: HermesConfigUnpushed
+        expr: hermes_repo_unpushed > 0
+        for: 6h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hermes configuration has committed but unpushed changes"
+          description: "GitHub is the source of truth; local-only commits are invisible to
+            every other node and to recovery."
+
+      - alert: HermesNodeSilent
+        expr: increase(hermes_node_messages_total[24h]) == 0 and hermes_nodes_known > 1
+        for: 1h
+        labels:
+          severity: info
+        annotations:
+          summary: "Node {{ $labels.node }} has been silent for 24h"
+          description: "A known peer has not sent anything for a day. The node may be down,
+            off the tailnet, or simply idle."

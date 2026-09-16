@@ -7,6 +7,17 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 log(){ printf '\033[35m[bootstrap]\033[0m %s\n' "$*"; }
 
+# Two shapes of "clean server", one entrypoint:
+#   host  (default)  full node: systemd units, /home/hermes layout, local LLM balancer
+#   node  (--no-systemd)  container/peer node: no systemd, its own HERMES_HOME, joins the bus
+# Keeping this in ONE script is deliberate: recovery must not have a second, less-tested path.
+MODE=host
+[[ "${1:-}" == "--no-systemd" ]] && MODE=node
+if [[ "$MODE" == "node" ]]; then
+  log "node mode: delegating to deploy/node-entrypoint.sh (no systemd, peer node)"
+  exec bash "$REPO_DIR/deploy/node-entrypoint.sh"
+fi
+
 log "1/11 os + arch probe"
 . /etc/os-release 2>/dev/null || true
 log "     ${PRETTY_NAME:-unknown} · $(uname -m) · kernel $(uname -r)"

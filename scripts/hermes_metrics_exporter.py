@@ -237,8 +237,186 @@ def probe_tailscale() -> list[str]:
     return out
 
 
+# --------------------------------------------------------------------- bus/agents
+# Added 2026-09-16 with the distributed Agent Bus. Before this, the exporter watched the
+# kanban board only; the transport that actually carries cross-node traffic (NATS), the
+# agents attached to it, and the peer nodes were invisible to Prometheus — so an alert
+# could not exist for any of them.
+def probe_agent_bus() -> list[str]:
+    """NATS transport + JetStream stream + this node's consumer backlog."""
+    out = [
+        "# HELP hermes_bus_up 1 if the local NATS server answers its monitoring endpoint",
+        "# TYPE hermes_bus_up gauge",
+        "# HELP hermes_bus_connections Current client connections",
+        "# TYPE hermes_bus_connections gauge",
+        "# HELP hermes_bus_stream_messages Messages retained in the AGENT_BUS stream",
+        "# TYPE hermes_bus_stream_messages gauge",
+        "# HELP hermes_bus_consumer_ack_pending Unacked messages for this node's consumer",
+        "# TYPE hermes_bus_consumer_ack_pending gauge",
+        "# HELP hermes_bus_stream_bytes Bytes stored in the stream",
+        "# TYPE hermes_bus_stream_bytes gauge",
+    ]
+    try:
+        varz = _get_json("http://127.0.0.1:8222/varz")
+    except Exception:
+        out.append("hermes_bus_up 0")
+        return out
+    out.append("hermes_bus_up 1")
+    out.append(f"hermes_bus_connections {int(varz.get('connections', 0))}")
+    try:
+        tok = ""
+        try:
+            with open("/etc/hermes/nats.env") as fh:
+                for line in fh:
+                    if line.startswith("NATS_TOKEN="):
+                        tok = line.split("=", 1)[1].strip()
+        except Exception:
+            pass
+        if tok:
+            import nats  # type: ignore  # only in the bus venv; guarded below
+    except Exception:
+        pass
+    # Read the stream via the bus CLI (it already knows the token handling) rather than
+    # duplicating the client here.
+    try:
+        env = dict(os.environ)
+        try:
+            with open("/etc/hermes/nats.env") as fh:
+                for line in fh:
+                    if "=" in line and not line.startswith("#"):
+                        k, v = line.strip().split("=", 1)
+                        env.setdefault(k, v)
+        except Exception:
+            pass
+        res = subprocess.run(["/usr/local/bin/hermes-bus-bridge", "status"],
+                             capture_output=True, text=True, timeout=12, env=env)
+        for line in res.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("stream"):
+                m = re.search(r"msgs=(\d+) bytes=(\d+)", line)
+                if m:
+                    out.append(f"hermes_bus_stream_messages {int(m.group(1))}")
+                    out.append(f"hermes_bus_stream_bytes {int(m.group(2))}")
+            if "ack_pending=" in line:
+                m = re.search(r"ack_pending=(\d+)", line)
+                if m:
+                    out.append(f"hermes_bus_consumer_ack_pending {int(m.group(1))}")
+    except Exception:
+        pass
+    return out
+
+
+def probe_bus_agents() -> list[str]:
+    """Are the agents attached, and how many are defined/serving?"""
+    out = [
+        "# HELP hermes_agents_defined Agents wired in config/agents (agent_id + handlers)",
+        "# TYPE hermes_agents_defined gauge",
+        "# HELP hermes_agents_runtime_up 1 if an agents runtime process is alive",
+        "# TYPE hermes_agents_runtime_up gauge",
+        "# HELP hermes_agents_handlers_total Declared handlers across all agents",
+        "# TYPE hermes_agents_handlers_total gauge",
+        "# HELP hermes_agents_dispatched_pending Tasks the orchestrator is still waiting on",
+        "# TYPE hermes_agents_dispatched_pending gauge",
+        "# HELP hermes_nodes_known Nodes that have ever spoken on this bus",
+        "# TYPE hermes_nodes_known gauge",
+    ]
+    try:
+        import glob
+        import yaml  # type: ignore
+        defined = handlers = 0
+        for f in (glob.glob("/opt/hermes/config/agents/*.yaml")
+                  + glob.glob("/opt/hermes/config/agents/projects/*.yaml")):
+            try:
+                d = yaml.safe_load(open(f)) or {}
+            except Exception:
+                continue
+            b = d.get("bus") or {}
+            if b.get("agent_id"):
+                defined += 1
+                handlers += len(b.get("handlers") or {})
+        out.append(f"hermes_agents_defined {defined}")
+        out.append(f"hermes_agents_handlers_total {handlers}")
+    except Exception:
+        pass
+
+    alive = 0
+    for cmd in (["systemctl", "is-active", "--quiet", "hermes-agents"],):
+        try:
+            alive = 1 if subprocess.run(cmd, timeout=5).returncode == 0 else alive
+        except Exception:
+            pass
+    if not alive:
+        try:
+            alive = 1 if subprocess.run(["pgrep", "-f", "agents/runtime.py run"],
+                                        timeout=5).returncode == 0 else 0
+        except Exception:
+            alive = 0
+    out.append(f"hermes_agents_runtime_up {alive}")
+
+    try:
+        with open("/var/lib/hermes-agents/pending.json") as fh:
+            out.append(f"hermes_agents_dispatched_pending {len(json.load(fh))}")
+    except Exception:
+        out.append("hermes_agents_dispatched_pending 0")
+
+    try:
+        with open("/var/lib/hermes-bus/nodes.json") as fh:
+            nodes = json.load(fh)
+        out.append(f"hermes_nodes_known {len(nodes)}")
+        for name, rec in nodes.items():
+            safe = re.sub(r"[^A-Za-z0-9_-]", "_", name)
+            msgs = int(rec.get("msgs") or 0)
+            out.append(f'hermes_node_messages_total{{node="{safe}"}} {msgs}')
+    except Exception:
+        out.append("hermes_nodes_known 0")
+    return out
+
+
+def probe_projects() -> list[str]:
+    """Project agents: how many projects are represented, and is their tree still there?
+    A project agent whose local_path vanished is a silent, permanent lie in the registry."""
+    out = [
+        "# HELP hermes_projects_wired Project agents defined",
+        "# TYPE hermes_projects_wired gauge",
+        "# HELP hermes_project_path_present 1 if the project's local_path exists",
+        "# TYPE hermes_project_path_present gauge",
+        "# HELP hermes_project_dirty Uncommitted paths in the project repo",
+        "# TYPE hermes_project_dirty gauge",
+    ]
+    try:
+        import glob
+        import yaml  # type: ignore
+        n = 0
+        for f in glob.glob("/opt/hermes/config/agents/projects/*.yaml"):
+            try:
+                d = yaml.safe_load(open(f)) or {}
+            except Exception:
+                continue
+            tech = d.get("technology") or {}
+            path = tech.get("local_path")
+            if not path:
+                continue
+            n += 1
+            slug = re.sub(r"[^A-Za-z0-9_-]", "_", os.path.basename(f)[:-5])
+            out.append(f'hermes_project_path_present{{project="{slug}"}} '
+                       f'{1 if os.path.isdir(path) else 0}')
+            if os.path.isdir(os.path.join(path, ".git")):
+                try:
+                    r = subprocess.run(["git", "-C", path, "status", "--porcelain"],
+                                       capture_output=True, text=True, timeout=10)
+                    dirty = len([l for l in r.stdout.splitlines() if l.strip()])
+                    out.append(f'hermes_project_dirty{{project="{slug}"}} {dirty}')
+                except Exception:
+                    pass
+        out.append(f"hermes_projects_wired {n}")
+    except Exception:
+        pass
+    return out
+
+
 PROBES = (probe_units, probe_shim, probe_balancer, probe_agents, probe_bus,
-          probe_github, probe_tailscale)
+          probe_github, probe_tailscale, probe_agent_bus, probe_bus_agents,
+          probe_projects)
 
 
 class Handler(BaseHTTPRequestHandler):

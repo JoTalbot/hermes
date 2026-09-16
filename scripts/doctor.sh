@@ -232,6 +232,111 @@ else
 fi
 
 
+
+# 14. Agent Bus transport — NATS + JetStream + the node's own bridge
+# The bus stopped being "kanban on one host" on 2026-09-16: it is now the thing that
+# carries every cross-node message. A doctor that says HEALTHY while the bus is dead
+# would bless a federation that cannot talk.
+NATS_ENV_FILE="${NATS_ENV_FILE:-/etc/hermes/nats.env}"
+if curl -sf -m 4 http://127.0.0.1:8222/healthz >/dev/null 2>&1; then
+  VARZ="$(curl -sf -m 4 http://127.0.0.1:8222/varz 2>/dev/null)"
+  VER="$(printf '%s' "$VARZ" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("version","?"))' 2>/dev/null || echo '?')"
+  CONNS="$(printf '%s' "$VARZ" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("connections","?"))' 2>/dev/null || echo '?')"
+  ok "BusTransport" "nats-server $VER healthy, $CONNS client connection(s)"
+else
+  fail "BusTransport" "nats-server not answering on 127.0.0.1:8222 — no cross-node messaging"
+fi
+if [[ -r "$NATS_ENV_FILE" ]]; then
+  ok "BusToken" "$NATS_ENV_FILE present ($(stat -c %a "$NATS_ENV_FILE"))"
+else
+  warn "BusToken" "$NATS_ENV_FILE missing/unreadable — this node cannot join the bus"
+fi
+if systemctl is-active --quiet hermes-bus-bridge 2>/dev/null; then
+  ok "BusBridge" "hermes-bus-bridge active"
+elif pgrep -f 'bus_bridge.py run' >/dev/null 2>&1; then
+  ok "BusBridge" "bus_bridge.py running (no-systemd supervisor)"
+else
+  fail "BusBridge" "no bridge process — this node neither mirrors nor forwards bus traffic"
+fi
+STREAM="$(hermes-bus-bridge status 2>/dev/null | grep '^stream' || true)"
+if [[ -n "$STREAM" ]]; then
+  ok "BusStream" "${STREAM#stream      : }"
+  PENDING="$(printf '%s' "$STREAM" | grep -o 'ack_pending=[0-9]*' | head -1)"
+  if [[ -n "$PENDING" && "${PENDING#ack_pending=}" -gt 50 ]]; then
+    warn "BusBacklog" "$PENDING — this node is not consuming what it is sent"
+  fi
+else
+  warn "BusStream" "stream state unreadable (bus down?)"
+fi
+
+# 15. Agents on the bus — registry integrity + liveness over the REAL transport
+AGENTS_PY="${AGENTS_PY:-/opt/hermes/agents/runtime.py}"
+VENV_BUS="${VENV_BUS:-/opt/hermes/.venv-bus/bin/python}"
+if [[ -f "$AGENTS_PY" && -x "$VENV_BUS" ]]; then
+  REG="$("$VENV_BUS" "$AGENTS_PY" list 2>/dev/null | tail -n +2)"
+  N_AGENTS="$(printf '%s\n' "$REG" | grep -c '\[' || true)"
+  if [[ "${N_AGENTS:-0}" -ge 6 ]]; then
+    ok "AgentRegistry" "$N_AGENTS agents wired (id, capabilities, handlers)"
+  else
+    warn "AgentRegistry" "only $N_AGENTS agent(s) wired — run scripts/wire-agents.sh"
+  fi
+  if bash "$REPO_DIR/scripts/wire-agents.sh" --check >/dev/null 2>&1; then
+    ok "AgentWiring" "config/agents matches the generator (no drift)"
+  else
+    warn "AgentWiring" "wire-agents.sh --check reports drift — run scripts/wire-agents.sh"
+  fi
+  if systemctl is-active --quiet hermes-agents 2>/dev/null || pgrep -f 'agents/runtime.py run' >/dev/null 2>&1; then
+    FIRST_AGENT="$(printf '%s\n' "$REG" | head -1 | awk '{print $3}')"
+    if hermes-bus request --to "$FIRST_AGENT" --timeout 25 "ping" 2>/dev/null | grep -q 'reply in'; then
+      ok "AgentLiveness" "$FIRST_AGENT answered over the bus"
+    else
+      fail "AgentLiveness" "$FIRST_AGENT did not answer — agents are not attached to the bus"
+    fi
+  else
+    fail "AgentRuntime" "no agents runtime process — nothing can answer a task"
+  fi
+else
+  warn "AgentRuntime" "$AGENTS_PY or $VENV_BUS missing — install-agent-runtime.sh not run"
+fi
+
+# 16. Federation — who else is on this bus, and are they alive?
+NODES_FILE=/var/lib/hermes-bus/nodes.json
+if [[ -r "$NODES_FILE" ]]; then
+  read -r TOTAL PEERS <<<"$(python3 - "$NODES_FILE" <<'PYEOF2'
+import json, sys, datetime
+d = json.load(open(sys.argv[1]))
+now = datetime.datetime.now(datetime.timezone.utc)
+peers = [k for k, v in d.items() if k != "arm-server-01"]
+print(len(d), len(peers))
+PYEOF2
+)"
+  if (( TOTAL >= 2 )); then
+    ok "Federation" "$TOTAL node(s) seen on the bus ($PEERS peer(s))"
+  else
+    warn "Federation" "only this node has been seen on the bus so far"
+  fi
+  STALE="$(python3 - "$NODES_FILE" <<'PYEOF2'
+import json, sys, datetime
+d = json.load(open(sys.argv[1]))
+now = datetime.datetime.now(datetime.timezone.utc)
+stale = []
+for k, v in d.items():
+    ts = v.get("last_seen") or ""
+    try:
+        age = (now - datetime.datetime.fromisoformat(ts)).total_seconds() / 3600
+    except Exception:
+        continue
+    if age > 24:
+        stale.append(f"{k} ({age:.0f}h)")
+print(", ".join(stale))
+PYEOF2
+)"
+  [[ -z "$STALE" ]] && ok "PeerFreshness" "every known peer reported within 24h" \
+                    || warn "PeerFreshness" "silent for >24h: $STALE"
+else
+  warn "Federation" "no /var/lib/hermes-bus/nodes.json yet (bus never saw a message)"
+fi
+
 echo
 if (( CRIT > 0 )); then
   printf '%sSYSTEM HEALTH: UNHEALTHY%s (%d critical, %d warnings)\n' "$RED" "$RST" "$CRIT" "$WARN"; exit 1

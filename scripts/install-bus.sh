@@ -6,6 +6,15 @@
 #
 #   sudo bash /opt/hermes/scripts/install-bus.sh
 set -euo pipefail
+# `install` refuses to copy a file onto itself, and that is the NORMAL case when the repo
+# lives at the install target (/opt/hermes). Every self-copy goes through this helper.
+place() { local src="$1" dst="$2" mode="${3:-0644}"
+  if [[ "$(readlink -f "$src")" == "$(readlink -f "$dst" 2>/dev/null || echo -)" ]]; then
+    return 0
+  fi
+  install -m "$mode" "$src" "$dst"
+}
+
 SRC="${SRC:-/opt/hermes}"
 VENV=/opt/hermes/.venv-bus
 BUS_DIR=/opt/hermes/bus
@@ -52,11 +61,11 @@ if [[ "$NOSYSTEMD" == "1" ]]; then
   # Containers and rescue shells have no PID 1 systemd; the very same daemon runs under
   # a PID-file supervisor so that "add a node" is not a special build.
   install -d -m 0755 /opt/hermes/deploy/nosystemd
-  install -m 0755 "$SRC/deploy/nosystemd/ctl.sh" /opt/hermes/deploy/nosystemd/ctl.sh
+  place "$SRC/deploy/nosystemd/ctl.sh" /opt/hermes/deploy/nosystemd/ctl.sh 0755
   bash /opt/hermes/deploy/nosystemd/ctl.sh restart bus-bridge
 else
   install -d -m 0755 /etc/systemd/system 2>/dev/null || true
-  install -m 0644 "$SRC/deploy/systemd/hermes-bus-bridge.service" /etc/systemd/system/
+  place "$SRC/deploy/systemd/hermes-bus-bridge.service" /etc/systemd/system/hermes-bus-bridge.service 0644
   systemctl daemon-reload
   systemctl enable hermes-bus-bridge >/dev/null 2>&1
   systemctl restart hermes-bus-bridge

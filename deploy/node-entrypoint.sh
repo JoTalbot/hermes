@@ -21,10 +21,18 @@ export DEBIAN_FRONTEND=noninteractive
 step() { printf '\033[35m[node]\033[0m %s\n' "$*"; }
 
 step "1/6 base packages"
-if ! command -v python3 >/dev/null; then
+# Check every tool we actually use. A bare ubuntu image HAS python3 but not sudo/venv, and
+# a single "is python3 present?" probe skipped the install and blew up three steps later.
+need=""
+for t in python3 git curl sudo ps; do command -v "$t" >/dev/null || need="$need $t"; done
+python3 -c 'import venv' 2>/dev/null || need="$need python3-venv"
+if [[ -n "$need" ]]; then
+  step "     installing:$need"
   apt-get update -qq
-  apt-get install -y -qq --no-install-recommends python3 python3-venv python3-pip \
-    git curl ca-certificates nano >/dev/null
+  apt-get install -y -qq --no-install-recommends ca-certificates python3 python3-venv \
+      python3-pip git curl sudo procps nano >/dev/null
+else
+  step "     base tools already present"
 fi
 step "     $(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-linux}") · $(uname -m)"
 echo "$(hostname)" > /etc/hostname.node-original
@@ -73,6 +81,14 @@ step "5/6 wire + start agents"
 # This node serves the core specialists: it has no project checkouts, and running agents
 # for paths that do not exist would flood the chat with "path missing".
 export HERMES_LOCAL_AGENTS="${HERMES_LOCAL_AGENTS:-core}"
+# This node is a peer, not the primary: its agents get node-scoped bus ids
+# (<server_id>/<agent>) so the same role can exist on many nodes without colliding.
+export HERMES_AGENT_SCOPE="${HERMES_AGENT_SCOPE:-node}"
+# Persist the role so a restart (systemd or ctl.sh) cannot drop it.
+umask 077
+printf 'export HERMES_LOCAL_AGENTS=%s\nexport HERMES_AGENT_SCOPE=%s\n' \
+  "$HERMES_LOCAL_AGENTS" "$HERMES_AGENT_SCOPE" > /etc/hermes/node.env
+chmod 0600 /etc/hermes/node.env
 bash /opt/hermes/scripts/install-agent-runtime.sh --no-systemd 2>&1 | tail -8
 
 step "6/6 prove it"
@@ -83,4 +99,6 @@ hermes-bus post --channel server --kind status --priority normal \
   | head -3
 hermes-bus-bridge status | head -6
 step "node ready: $(hostname)"
-tail -f /dev/null
+# No `tail -f /dev/null` here on purpose: this script is also executed through
+# `docker exec` during a drill, and an entrypoint that never returns looks exactly
+# like a hang — which is how one 28-minute timeout was spent.

@@ -447,9 +447,11 @@ def cmd_nodes(a) -> int:
         print("no nodes registered on the bus yet")
         return 0
     nodes = json.loads(d.read_text())
-    for n in nodes.values():
-        print(f"  {n.get('node'):<24} {n.get('server'):<16} last_seen={n.get('last_seen')} "
-              f"msgs={n.get('msgs')}")
+    for key, n in sorted(nodes.items()):
+        # Fields can be missing: any node publishing a hand-made envelope registers a
+        # partial entry. Formatting must not decide whether the operator sees the list.
+        print(f"  {str(n.get('node') or key):<28} {str(n.get('server') or '?'):<18} "
+              f"msgs={n.get('msgs', '?')} last_seen={n.get('last_seen') or '?'}")
     return 0
 
 

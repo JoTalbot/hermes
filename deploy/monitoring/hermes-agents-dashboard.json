@@ -1,0 +1,496 @@
+{
+ "uid": "hermes-agent-bus",
+ "title": "Hermes Agent Bus & Agents",
+ "tags": [
+  "hermes",
+  "agents",
+  "bus"
+ ],
+ "timezone": "utc",
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "30s",
+ "time": {
+  "from": "now-6h",
+  "to": "now"
+ },
+ "panels": [
+  {
+   "type": "stat",
+   "title": "Agent Bus up",
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_bus_up",
+     "legendFormat": "bus"
+    }
+   ],
+   "description": "1 = nats-server answers /varz. 0 = no cross-node traffic.",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "value",
+    "graphMode": "area",
+    "textMode": "auto"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Agents runtime up",
+   "gridPos": {
+    "x": 4,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_agents_runtime_up",
+     "legendFormat": "runtime"
+    }
+   ],
+   "description": "1 = an agents runtime process is attached to hermes.dm.* / hermesrpc.*",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "value",
+    "graphMode": "area",
+    "textMode": "auto"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Nodes on the bus",
+   "gridPos": {
+    "x": 8,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_nodes_known",
+     "legendFormat": "nodes"
+    }
+   ],
+   "description": "Nodes that have ever spoken on this bus (federation size).",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "value",
+    "graphMode": "area",
+    "textMode": "auto"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Agents wired / handlers",
+   "gridPos": {
+    "x": 12,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_agents_defined",
+     "legendFormat": "agents"
+    },
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_agents_handlers_total",
+     "legendFormat": "handlers"
+    }
+   ],
+   "description": "config/agents registry: agents and their declared handlers.",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "value",
+    "graphMode": "area",
+    "textMode": "auto"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Stream messages (retained)",
+   "gridPos": {
+    "x": 18,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_bus_stream_messages",
+     "legendFormat": "msgs"
+    }
+   ],
+   "description": "JetStream AGENT_BUS retention: the replayable history for offline nodes.",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "value",
+    "graphMode": "area",
+    "textMode": "auto"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Bus consumer backlog (ack_pending)",
+   "gridPos": {
+    "x": 0,
+    "y": 4,
+    "w": 8,
+    "h": 7
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_bus_consumer_ack_pending",
+     "legendFormat": "ack_pending"
+    }
+   ],
+   "description": "Unacked messages for this node's durable consumer. Rising = the node is behind.",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Connections to the bus",
+   "gridPos": {
+    "x": 8,
+    "y": 4,
+    "w": 5,
+    "h": 7
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_bus_connections",
+     "legendFormat": "connections"
+    }
+   ],
+   "description": "Client connections (each node = bridge + CLI + agents runtime).",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Dispatched tasks awaiting a result",
+   "gridPos": {
+    "x": 13,
+    "y": 4,
+    "w": 5,
+    "h": 7
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_agents_dispatched_pending",
+     "legendFormat": "pending"
+    }
+   ],
+   "description": "Orchestrator correlations still open. Stuck > 0 for long = a silent agent.",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Messages per node (cumulative)",
+   "gridPos": {
+    "x": 18,
+    "y": 4,
+    "w": 6,
+    "h": 7
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_node_messages_total",
+     "legendFormat": "{{node}}"
+    }
+   ],
+   "description": "How much each node contributes to the shared bus.",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Project trees present",
+   "gridPos": {
+    "x": 0,
+    "y": 11,
+    "w": 8,
+    "h": 7
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_project_path_present",
+     "legendFormat": "{{project}}"
+    }
+   ],
+   "description": "1 = the project checkout exists on this node. 0 = the project agent points at nothing.",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Project uncommitted paths",
+   "gridPos": {
+    "x": 8,
+    "y": 11,
+    "w": 8,
+    "h": 7
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_project_dirty",
+     "legendFormat": "{{project}}"
+    }
+   ],
+   "description": "Modified/untracked paths per project repo. Uncommitted work is not covered by recovery.",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Repo hygiene (Hermes config)",
+   "gridPos": {
+    "x": 16,
+    "y": 11,
+    "w": 8,
+    "h": 7
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_repo_dirty",
+     "legendFormat": "dirty"
+    },
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_repo_unpushed",
+     "legendFormat": "unpushed"
+    }
+   ],
+   "description": "GitHub is the source of truth: dirty/unpushed means other nodes cannot see this state.",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     }
+    },
+    "overrides": []
+   }
+  }
+ ]
+}
