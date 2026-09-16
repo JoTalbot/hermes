@@ -80,7 +80,6 @@ bus:
   capabilities:
   - project:logistics-opt-orchestrator-projects-logistics
   - repo-state
-  - container-state
   handlers:
     status:
       run: bash /opt/hermes/agents/checks/project-check.sh
@@ -89,6 +88,5 @@ bus:
         PROJECT_SLUG: "logistics-opt-orchestrator-projects-logistics"
         PROJECT_PATH: "/opt/orchestrator/projects/logistics"
         PROJECT_REPO: "https://github.com/JoTalbot/logistics"
-        PROJECT_CONTAINERS: "logistics-collector-collector-1 logistics-collector-enqueuer-1 logistics-collector-normalizer-1 logistics-collector-postgres-1"
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

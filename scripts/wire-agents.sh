@@ -48,7 +48,10 @@ def containers(slug: str) -> list[str]:
                              capture_output=True, text=True, timeout=20).stdout
     except Exception:
         return []
-    return sorted({n for n in out.split() if slug.split("-")[0] in n})[:4]
+    # Exact-ish match only: matching on the first token made project "hermes-os" claim
+    # hermes-node-02/03 as its containers, so its wiring block changed whenever a peer
+    # node was created and `wire-agents.sh --check` reported drift forever.
+    return sorted({n for n in out.split() if n == slug or n.startswith(slug + "-")})[:4]
 
 # ── core specialists ────────────────────────────────────────────────────────
 CORE = {

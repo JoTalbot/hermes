@@ -337,6 +337,28 @@ else
   warn "Federation" "no /var/lib/hermes-bus/nodes.json yet (bus never saw a message)"
 fi
 
+
+# 17. Gateway unit integrity — the gateway must run from THIS node's hermes home.
+# `hermes gateway restart --system` regenerated the unit against another user's venv and
+# the gateway crash-looped for minutes before anyone noticed. Reboots are only safe if the
+# unit that starts is the unit we tested.
+# Use the EFFECTIVE configuration: `systemctl cat` prints base + drop-ins and the first
+# ExecStart line comes from the base unit, so a correctly overridden unit looked broken
+# (the check reported UNHEALTHY while the service was demonstrably running the right binary).
+GW_EXEC="$(systemctl show hermes-gateway -p ExecStart --value 2>/dev/null | grep -oE '/[^ ;"]*hermes[^ ;"]*' | head -1)"
+if [[ -z "$GW_EXEC" ]]; then
+  warn "GatewayUnit" "hermes-gateway unit not found (not a host node?)"
+elif [[ "$GW_EXEC" == *"/home/hermes/"* ]]; then
+  ok "GatewayUnit" "ExecStart=${GW_EXEC}"
+else
+  fail "GatewayUnit" "ExecStart points outside /home/hermes: $GW_EXEC — a regenerated unit; reinstall the drop-in (deploy/systemd/hermes-gateway.service.d/10-hermes-home.conf)"
+fi
+if [[ -f /etc/systemd/system/hermes-gateway.service.d/10-hermes-home.conf ]]; then
+  ok "GatewayPin" "drop-in pins the interpreter (survives 'gateway restart --system')"
+else
+  warn "GatewayPin" "no drop-in — 'hermes gateway restart --system' can re-break the unit"
+fi
+
 echo
 if (( CRIT > 0 )); then
   printf '%sSYSTEM HEALTH: UNHEALTHY%s (%d critical, %d warnings)\n' "$RED" "$RST" "$CRIT" "$WARN"; exit 1

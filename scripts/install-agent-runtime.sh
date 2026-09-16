@@ -7,6 +7,9 @@
 #
 #   sudo bash /opt/hermes/scripts/install-agent-runtime.sh
 set -euo pipefail
+# A node's role (agent scope, local agent subset) lives in a file so that every
+# install/restart path agrees on it — not only the shell that first set it up.
+[[ -f /etc/hermes/node.env ]] && . /etc/hermes/node.env
 # `install` refuses to copy a file onto itself, and that is the NORMAL case when the repo
 # lives at the install target (/opt/hermes). Every self-copy goes through this helper.
 place() { local src="$1" dst="$2" mode="${3:-0644}"
@@ -51,7 +54,12 @@ echo "=== 3. registry ==="
 
 echo "=== 4. selftest: local handler, then over the bus ==="
 "$VENV/bin/python" "$REPO_DIR/agents/runtime.py" invoke server-guardian identity | head -6 | sed 's/^/  /'
-FIRST_AGENT="$(HERMES_LOCAL_AGENTS="${HERMES_LOCAL_AGENTS:-all}" "$VENV/bin/python" "$REPO_DIR/agents/runtime.py" list 2>/dev/null | sed -n '2p' | awk '{print $3}')"
+FIRST_AGENT="$(HERMES_LOCAL_AGENTS="${HERMES_LOCAL_AGENTS:-all}" REPO_DIR="$REPO_DIR" "$VENV/bin/python" -c '
+import os, sys
+sys.path.insert(0, os.path.join(os.environ["REPO_DIR"], "agents"))
+import runtime
+ids = sorted(runtime.load_agents())
+print(ids[0] if ids else "")' 2>/dev/null)"
 echo "  --- bus request: hermes-bus request --to $FIRST_AGENT 'ping' ---"
 if hermes-bus request --to "${FIRST_AGENT:-server-guardian}" --timeout 90 "ping" 2>&1 | head -8 | sed 's/^/  /'; then
   echo "  bus → agent → bus: OK"

@@ -6,6 +6,9 @@
 #
 #   sudo bash /opt/hermes/scripts/install-bus.sh
 set -euo pipefail
+# A node's role (agent scope, local agent subset) lives in a file so that every
+# install/restart path agrees on it — not only the shell that first set it up.
+[[ -f /etc/hermes/node.env ]] && . /etc/hermes/node.env
 # `install` refuses to copy a file onto itself, and that is the NORMAL case when the repo
 # lives at the install target (/opt/hermes). Every self-copy goes through this helper.
 place() { local src="$1" dst="$2" mode="${3:-0644}"

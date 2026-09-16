@@ -89,10 +89,17 @@ def node_name() -> str:
 
 
 def default_agent() -> str:
+    """Who is speaking when nothing says otherwise.
+
+    A message from a shell on a node is a human action, so it is attributed to the human
+    on that node — "unknown" in the chat history was unreadable and, worse, useless for
+    auditing who did what.
+    """
     return (os.environ.get("HERMES_PROFILE")
             or os.environ.get("HERMES_AGENT_ID")
             or os.environ.get("USER")
-            or "unknown")
+            or os.environ.get("LOGNAME")
+            or f"human@{server_id()}")
 
 
 def nats_conf() -> tuple[str, str]:
@@ -441,6 +448,28 @@ def cmd_channels(a) -> int:
     return 0
 
 
+def cmd_digest(a) -> int:
+    """One screen for the phone: what happened, per channel, facts only."""
+    print(f"GLOBAL CHAT digest · узел {server_id()} · {datetime.now(timezone.utc):%Y-%m-%d %H:%M}Z")
+    total = 0
+    for ch in CHANNELS:
+        rows = _read_local(ch, a.n)
+        if not rows:
+            print(f"  #{ch:<12} —")
+            continue
+        total += len(rows)
+        authors: dict[str, int] = {}
+        for r in rows:
+            authors[r["frm"]] = authors.get(r["frm"], 0) + 1
+        top = ", ".join(f"{k}×{v}" for k, v in sorted(authors.items(), key=lambda x: -x[1])[:3])
+        last = rows[-1]
+        print(f"  #{ch:<12} {len(rows):>3} сообщ.  [{top}]")
+        print(f"      последнее: {last['kind']}/{last['prio']} {last['frm']}: "
+              f"{last['text'].strip()[:110]}")
+    print(f"\nвсего показано: {total} сообщений (по {a.n} на канал)")
+    return 0
+
+
 def cmd_nodes(a) -> int:
     d = STATE_DIR / "nodes.json"
     if not d.exists():
@@ -487,6 +516,9 @@ def main() -> int:
 
     p = sub.add_parser("inbox"); p.add_argument("--agent", default=None)
     p.add_argument("-n", type=int, default=20); p.set_defaults(f=cmd_inbox)
+
+    p = sub.add_parser("digest"); p.add_argument("-n", type=int, default=5)
+    p.set_defaults(f=cmd_digest)
 
     sub.add_parser("channels").set_defaults(f=cmd_channels)
     sub.add_parser("nodes").set_defaults(f=cmd_nodes)

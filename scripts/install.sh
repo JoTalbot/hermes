@@ -138,6 +138,15 @@ fi
 for u in hermes-shim hermes-serve; do
   install -m 0644 -o root -g root "$REPO_DIR/deploy/systemd/$u.service" "/etc/systemd/system/$u.service"
 done
+# Pin the gateway interpreter/home with a drop-in. `hermes gateway restart --system`
+# REGENERATES the base unit and (measured 2026-09-16) pointed it at another operator's
+# venv, which the service user cannot execute: 203/EXEC, restart counter 19, the gateway
+# stuck in "activating". A drop-in is not regenerated, so the correct values always win.
+if [[ -d "$REPO_DIR/deploy/systemd/hermes-gateway.service.d" ]]; then
+  install -d -m 0755 /etc/systemd/system/hermes-gateway.service.d
+  install -m 0644 -o root -g root "$REPO_DIR/deploy/systemd/hermes-gateway.service.d/"*.conf \
+          /etc/systemd/system/hermes-gateway.service.d/
+fi
 systemctl daemon-reload
 systemctl enable hermes-shim.service hermes-serve.service >/dev/null 2>&1 || log "enable failed (non-fatal if units start manually)"
 log "done. Next: scripts/install-agents.sh, then scripts/doctor.sh"

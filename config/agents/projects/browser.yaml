@@ -82,7 +82,6 @@ bus:
   - project:browser
   - repo-state
   - service-state
-  - container-state
   handlers:
     status:
       run: bash /opt/hermes/agents/checks/project-check.sh
@@ -92,6 +91,5 @@ bus:
         PROJECT_PATH: "/opt/octopus-browser"
         PROJECT_REPO: "https://github.com/JoTalbot/browser"
         PROJECT_SERVICE: "octopus-browser-aios-adapter.service octopus-browser.service"
-        PROJECT_CONTAINERS: "octopus-browser-chromium"
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

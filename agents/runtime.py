@@ -124,7 +124,27 @@ def load_yaml(path: Path) -> dict:
 # exists on every node, so the *bus* id of an agent on a secondary node is prefixed with
 # that node's server_id. The primary node keeps bare names for backwards compatibility and
 # because its agents are the ones a human types by hand.
-SCOPE = (os.environ.get("HERMES_AGENT_SCOPE") or "local").lower()
+def _node_env(key: str, default: str = "") -> str:
+    """Env var, else /etc/hermes/node.env, else default.
+
+    The peer's role must survive any restart path. Restarting it through a bare
+    `docker exec` (no exported vars) previously made its agents adopt the PRIMARY's
+    bare names — two nodes answering to one address, which is worse than no node.
+    """
+    if os.environ.get(key):
+        return os.environ[key]
+    try:
+        with open("/etc/hermes/node.env") as fh:
+            for line in fh:
+                line = line.strip().removeprefix("export ").strip()
+                if line.startswith(key + "="):
+                    return line.split("=", 1)[1].strip().strip('"\'')
+    except Exception:
+        pass
+    return default
+
+
+SCOPE = _node_env("HERMES_AGENT_SCOPE", "local").lower()
 
 
 class Agent:
@@ -170,8 +190,7 @@ def load_agents() -> dict[str, Agent]:
     a comma-separated list of ids. A container node has no project checkouts, so running 21
     project agents there would be 21 agents reporting "path missing" and nothing else.
     """
-    import os as _os
-    only = (_os.environ.get("HERMES_LOCAL_AGENTS") or "all").strip().lower()
+    only = _node_env("HERMES_LOCAL_AGENTS", "all").strip().lower()
     agents: dict[str, Agent] = {}
     paths = sorted(CONFIG_DIR.glob("*.yaml")) + sorted(PROJECT_AGENTS_DIR.glob("*.yaml"))
     for p in paths:

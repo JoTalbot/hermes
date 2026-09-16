@@ -81,7 +81,6 @@ bus:
   capabilities:
   - project:octopus-deploy
   - repo-state
-  - container-state
   handlers:
     status:
       run: bash /opt/hermes/agents/checks/project-check.sh
@@ -90,6 +89,5 @@ bus:
         PROJECT_SLUG: "octopus-deploy"
         PROJECT_PATH: "/opt/octopus-deploy"
         PROJECT_REPO: "https://github.com/JoTalbot/octopus-deploy"
-        PROJECT_CONTAINERS: "octopus octopus-browser-chromium octopus-child-8300 octopus-child-8301"
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

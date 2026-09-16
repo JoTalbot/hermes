@@ -44,8 +44,11 @@ Hermes at this directory via `skills.external_dirs` in `$HERMES_HOME/config.yaml
 | `response-format-ru` | ecosystem | mandated answer format, emoji dictionary, report template | `#70`, `001-GENERAL.md`, `TEMPLATE.md` |
 | `chatgpt-backend-export` | chatgpt | export all ChatGPT chats (TLS-fingerprint trick) | `/opt/orchestrator/chatgpt_export` |
 | `chatgpt-ui-driver` | chatgpt | drive the ChatGPT web UI over CDP, incl. reconnect rules | `/opt/orchestrator/agent_jo` |
+| `agent-bus` | multiagent | post/dm/request/reply/read/digest on the distributed bus, and the rules that keep it readable | built 2026-09-16 (NATS + agents) |
+| `agent-handlers` | multiagent | add a capability to an agent or a whole new agent, reproducibly (YAML + wire-agents.sh + tests) | built 2026-09-16 |
+| `federation-node-join` | server | join a new server/container to the federation and diagnose one that joined but stays silent | built 2026-09-16 (node-arm-02/03) |
 
-Cost: 9 skills add **870 B** to the system prompt (measured with `hermes prompt-size`; baseline
+Cost: 12 skills add a few hundred bytes more than the measured 870 B baseline (measured with `hermes prompt-size`; baseline
 with 0 skills was 11,845 B). Registering the whole Octopus catalogue would add ~20+ KB and starve
 the balancer's prompt budget — that is why `octopus-skill-catalog` is a pointer, not an import.
 
@@ -60,6 +63,9 @@ the balancer's prompt budget — that is why `octopus-skill-catalog` is a pointe
 | `backup` | verified config/state snapshots; **fails loud on a wrong/empty state dir** | Hermes layer | `HERMES_HOME`, `HERMES_BACKUP_DIR` | tar.gz + entry counts | reads state, writes backup dir | **1.1.0** | 2026-09-15 |
 | `register-skills` | point Hermes at the repo's skills dir (idempotent) | Hermes layer | `HERMES_SKILLS_DIR` | entry in `$HERMES_HOME/config.yaml` + verified count | writes runtime config | 1.0.0 | 2026-09-16 |
 | `agents-chat` | shared rooms for all profiles: say/read/tail/subscribe | multiagent | `HERMES_PROFILE` | comments on board `agents-chat` | writes kanban comments | 1.0.0 | 2026-09-16 |
+| `hermes-bus` | the GLOBAL CHAT + messaging surface (post/dm/request/read/digest) over NATS + local board | multiagent | `NATS_TOKEN` (0600 file) | `hermes.dm.*`, `hermes.chat.*`, `hermesrpc.rpc.*` | publishes + mirrors; never runs arbitrary commands | 1.0.0 | 2026-09-16 |
+| `wire-agents` | give agents a bus identity (id, capabilities, handlers) — idempotent, `--check` for drift | multiagent | root | `config/agents/**` markers | writes config only | 1.0.0 | 2026-09-16 |
+| `install-monitoring` | install Hermes alert rules + Grafana dashboard into the existing stack | server | root/docker | `/opt/octopus-monitoring/{rules,dashboards}` | backs up replaced files, SIGHUP reload | 1.0.0 | 2026-09-16 |
 | `verify-backup` | extract the newest archive and compare content hashes to the live tree | Hermes layer | archive path (default: newest) | `VERIFICATION OK/FAILED` | read-only + temp dir | 1.0.0 | 2026-09-15 |
 | `oci-cloud-firewall` | open/verify an inbound port on the **cloud** gate, not just ufw | whole node | port number | ingress rule + external proof | writes the OCI security list (root) | 1.0.0 | 2026-09-15 |
 | `dashboard-auth` | password-gated dashboard on a public port | remote access | `/etc/hermes/dashboard.env` | 302/401/200 behaviour | writes `$HERMES_HOME`, reads 0600 env | 1.0.0 | 2026-09-15 |

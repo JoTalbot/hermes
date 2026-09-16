@@ -80,7 +80,6 @@ bus:
   capabilities:
   - project:hermes-os
   - repo-state
-  - container-state
   handlers:
     status:
       run: bash /opt/hermes/agents/checks/project-check.sh
@@ -89,6 +88,5 @@ bus:
         PROJECT_SLUG: "hermes-os"
         PROJECT_PATH: "/opt/hermes"
         PROJECT_REPO: "https://github.com/JoTalbot/hermes"
-        PROJECT_CONTAINERS: "hermes-node-02 hermes-node-03"
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in
