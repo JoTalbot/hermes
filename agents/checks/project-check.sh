@@ -23,16 +23,29 @@ report_kv "репозиторий" "${PROJECT_REPO:-—}"
 
 if [[ -d "$PATH_/.git" ]]; then
   report_section "🐙 GIT"
-  BR=$(git -C "$PATH_" rev-parse --abbrev-ref HEAD 2>/dev/null)
-  DIRT=$(git -C "$PATH_" status --porcelain 2>/dev/null | wc -l)
-  AHEAD=$(git -C "$PATH_" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)
-  BEHIND=$(git -C "$PATH_" rev-list --count 'HEAD..@{u}' 2>/dev/null || echo 0)
-  report_kv "ветка" "$BR"
-  [[ "$DIRT" -eq 0 ]] && report_ok "дерево чистое" || report_warn "изменений: $DIRT"
-  [[ "$AHEAD" -eq 0 ]] && report_ok "всё отправлено" || report_warn "не отправлено: $AHEAD"
-  [[ "$BEHIND" -eq 0 ]] && report_ok "не отстаёт" || report_warn "отстаёт на $BEHIND коммитов"
-  report_section "🕐 ПОСЛЕДНИЕ КОММИТЫ"
-  git -C "$PATH_" log -3 --format='  %h %ad %s' --date=short 2>/dev/null | cut -c1-96
+  # FACT (2026-09-17): у 14 из 21 проектов каталог принадлежит другому пользователю
+  # (ubuntu, opc), а агент работает под root — git отказывается работать с чужим деревом
+  # («detected dubious ownership») и ВСЕ команды возвращают пустоту. Отчёт при этом печатал
+  # «дерево чистое / всё отправлено / не отстаёт»: агент утверждал, что проверил, хотя не
+  # прочитал ни одного байта. Сначала — доступность репозитория, и только потом выводы.
+  GITERR="$(git -C "$PATH_" rev-parse --verify -q HEAD 2>&1 >/dev/null)"
+  if [[ -n "$GITERR" ]]; then
+    report_bad "git не читает этот репозиторий — состояние НЕИЗВЕСТНО"
+    report_info "$(printf '%s' "$GITERR" | head -1 | cut -c1-110)"
+    report_info "причина: каталог принадлежит другому пользователю, а агент запущен от $(id -un)"
+    GIT_UNSAFE=1
+  else
+    BR=$(git -C "$PATH_" rev-parse --abbrev-ref HEAD 2>/dev/null)
+    DIRT=$(git -C "$PATH_" status --porcelain 2>/dev/null | wc -l)
+    AHEAD=$(git -C "$PATH_" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)
+    BEHIND=$(git -C "$PATH_" rev-list --count 'HEAD..@{u}' 2>/dev/null || echo 0)
+    report_kv "ветка" "$BR"
+    [[ "$DIRT" -eq 0 ]] && report_ok "дерево чистое" || report_warn "изменений: $DIRT"
+    [[ "$AHEAD" -eq 0 ]] && report_ok "всё отправлено" || report_warn "не отправлено: $AHEAD"
+    [[ "$BEHIND" -eq 0 ]] && report_ok "не отстаёт" || report_warn "отстаёт на $BEHIND коммитов"
+    report_section "🕐 ПОСЛЕДНИЕ КОММИТЫ"
+    git -C "$PATH_" log -3 --format='  %h %ad %s' --date=short 2>/dev/null | cut -c1-96
+  fi
 else
   report_section "🐙 GIT"; report_warn "это не git-дерево"
 fi
@@ -59,6 +72,11 @@ if command -v docker >/dev/null; then
 fi
 
 ACTIONS=()
+# Одна секция «что делать» на отчёт: подсказку про доступ добавляем в общий список, а не
+# печатаем второй footer внутри ветки GIT.
+[[ "${GIT_UNSAFE:-0}" == "1" ]] && ACTIONS+=(
+  "git не читает дерево — починить доступ (идемпотентно): bash /opt/hermes/scripts/install-git-safety.sh"
+  "после починки повторить: «статус проекта ${SLUG}»")
 [[ "${DIRT:-0}" -gt 0 ]] && ACTIONS+=("в проекте есть незакоммиченные изменения — посмотреть diff перед любыми действиями")
 [[ "${BEHIND:-0}" -gt 0 ]] && ACTIONS+=("проект отстаёт на ${BEHIND} коммитов — обновление согласовать с владельцем проекта")
 ACTIONS+=("спросить агента по смыслу: «почему проект ${SLUG} тормозит» (ответит модель по фактам)")

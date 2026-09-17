@@ -578,3 +578,27 @@ startup (`HERMES_PENDING_TTL`, default 6 h), reports each expiry to `#incidents`
 reaches Telegram), exports `hermes_agents_pending_overdue`, and the alert
 `HermesPendingOverdue` fires if anything stays overdue for 15 minutes. `/pending` marks them
 `⏰` instead of showing them as work in progress.
+
+## Project agents and other people's repositories (2026-09-17)
+
+FACT: 14 of the 21 project agents could not read their own repository. The trees belong to
+`ubuntu` / `opc` while the agents run as `root`, so git refused every command with
+`detected dubious ownership` — and `project-check.sh` turned the empty output into
+**«✅ дерево чистое · ✅ всё отправлено · ✅ не отстаёт»**. The agent claimed it had verified
+something it had not read a single byte of. Checked after the fix: `proj-octopus` reports
+branch `ops/browser-aios-adapter-deploy` with **3 unpushed commits** — information that had
+been silently replaced by «всё отправлено» for weeks.
+
+```bash
+bash /opt/hermes/scripts/install-git-safety.sh            # выдать доступ (идемпотентно)
+bash /opt/hermes/scripts/install-git-safety.sh --check    # GIT-SAFETY: OK
+```
+
+It adds each project `local_path` to `safe.directory` for every account that reads git —
+the agent unit's user, `root`, and the metrics exporter's user (`git config --global --add`,
+nothing else is touched). A repository that stays unreadable for a *different* reason (e.g.
+`.git` without `HEAD`) is reported as a warning, not as a failure: access cannot fix it, and
+the honest answer is `НЕИЗВЕСТНО`, which `project-check.sh` now prints with the reason and
+the exact command that would help.
+
+`install-agent-runtime.sh` runs this step, so a new node wires it correctly the first time.

@@ -202,3 +202,26 @@ verified (`hermes-fast`, 6 agent tiers, 3 escalations, sha256 acb2a140eaf9); bac
 produces state (568 entries, 71M) + nodecfg (6 files) + config archives, all verified;
 16 alert rules loaded; `tests/run.sh` **139 passed · 0 failed · 0 skipped**,
 `agents-selftest` 51/0.
+
+## Incident 34 (2026-09-17, sixth pass — the report that lied about being clean)
+
+34. **Fourteen project agents claimed their tree was clean.** `project-check.sh` read git
+    state as root, while the trees belong to `ubuntu`/`opc`: git answered `fatal: detected
+    dubious ownership` for every command, the variables came back empty, and the report
+    printed «✅ дерево чистое · ✅ всё отправлено · ✅ не отстаёт» for **14 of 21 projects**.
+    Empty string was being read as "nothing to report", exactly like the exporter that
+    reported four live projects as missing an hour earlier. Fixed twice over:
+    `project-check.sh` now proves it can read `HEAD` before making any claim (and prints
+    `НЕИЗВЕСТНО` plus the reason otherwise), and `scripts/install-git-safety.sh` adds every
+    project path to `safe.directory` for the agent user, root and the metrics user. Measured
+    after: `GIT-SAFETY: OK` (21/21 readable), and the real state surfaced — `proj-octopus` is
+    on `ops/browser-aios-adapter-deploy` with **3 unpushed commits**.
+
+    Also in this pass: the owner's decision restored `liza` (cloned to `/home/ubuntu/liza`,
+    41 commits, `main`, 136 MiB) and the last firing alert closed on its own; the GitHub
+    token used for the clone was stripped from `.git/config` afterwards and scrubbed from
+    root's shell history (a backup of that history was deleted rather than left behind).
+
+**Sixth-pass results:** `tests/run.sh` **146 passed · 0 failed · 0 skipped** (including live
+checks that a foreign repository is never reported as clean), `GIT-SAFETY: OK` (21/21),
+alerts firing: 0.

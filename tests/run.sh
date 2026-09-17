@@ -299,6 +299,33 @@ if [[ -f /etc/logrotate.d/hermes ]]; then
 else
   ((SKIP++)); echo "  ~ logrotate check skipped (правило не установлено здесь)"
 fi
+ck "a project report never claims clean state it could not read" \
+   "git не читает этот репозиторий" "$(grep -o 'git не читает этот репозиторий' agents/checks/project-check.sh | head -1)"
+ck "the fix for unreadable repos is shipped" "GIT-SAFETY: OK" \
+   "$(grep -o 'GIT-SAFETY: OK' scripts/install-git-safety.sh | head -1)"
+ck "the runtime installer hands the agent git access to its projects" "install-git-safety.sh" \
+   "$(grep -o 'install-git-safety.sh' scripts/install-agent-runtime.sh | head -1)"
+# Живая проверка на самом узле: репозиторий, принадлежащий другому пользователю, не должен
+# выглядеть «чистым», а после починки — должен читаться.
+if command -v git >/dev/null && command -v useradd >/dev/null && [[ "$(id -u)" == "0" ]]; then
+  TMPD="$(mktemp -d)"; mkdir -p "$TMPD/repo"
+  git -C "$TMPD/repo" init -q 2>/dev/null
+  git -C "$TMPD/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init 2>/dev/null
+  if id -u testsafe >/dev/null 2>&1 || useradd -M -s /usr/sbin/nologin testsafe 2>/dev/null; then
+    chown -R testsafe:testsafe "$TMPD/repo"
+    OUT="$(PROJECT_SLUG=t PROJECT_PATH="$TMPD/repo" bash agents/checks/project-check.sh 2>&1)"
+    ck "live: чужой репозиторий не выдаётся за чистый" "НЕИЗВЕСТНО" "$OUT"
+    ck "live: в отчёте названа причина, а не только факт" "dubious ownership" "$OUT"
+    chown -R root:root "$TMPD/repo"
+    OUT2="$(PROJECT_SLUG=t PROJECT_PATH="$TMPD/repo" bash agents/checks/project-check.sh 2>&1)"
+    ck "live: свой репозиторий читается и отчёт честный" "дерево чистое" "$OUT2"
+  else
+    ((SKIP++)); ((SKIP++))
+  fi
+  rm -rf "$TMPD"
+else
+  ((SKIP++)); ((SKIP++)); echo "  ~ live git-ownership checks skipped (нужен root и git)"
+fi
 if ls /var/backups/hermes/hermes-nodecfg-*.tar.gz >/dev/null 2>&1; then
   ck "live: the newest backup carries node config" "hermes-nodecfg-" \
      "$(ls -1t /var/backups/hermes/hermes-nodecfg-*.tar.gz | head -1 | sed 's|.*/||' | cut -c1-15)"
