@@ -602,3 +602,29 @@ the honest answer is `НЕИЗВЕСТНО`, which `project-check.sh` now prints
 the exact command that would help.
 
 `install-agent-runtime.sh` runs this step, so a new node wires it correctly the first time.
+
+## What the agents actually did (2026-09-17)
+
+Per-run logs were always written (`/var/lib/hermes-agents/logs/`), but nothing tied them together:
+"has this agent ever failed?" could only be answered by reading dozens of log files by hand, and a
+handler that failed on every single run looked exactly like a healthy one — no metric moved, no
+alert fired. Every run now also appends one line to `/var/lib/hermes-agents/history.jsonl`:
+agent, handler, who asked, exit code, duration, log path, first line of output. The file is
+append-only, rotated at 5 MiB (`history.jsonl.1…3`), and never records what the owner typed
+(`message`/`text`/`prompt`/`token`/`password` are dropped).
+
+```bash
+bash /opt/hermes/agents/checks/history.sh          # runs, failures, p50/p95 per agent
+ARG_AGENT=proj-liza ARG_N=200 bash /opt/hermes/agents/checks/history.sh   # one agent
+```
+
+In Telegram: «что делали агенты». The exporter turns the same file into
+`hermes_agent_runs_total`, `hermes_agent_failures_1h`, `hermes_agent_duration_p95_ms`,
+`hermes_agent_last_run_timestamp_seconds`, and the rule `HermesAgentFailing` fires when an agent
+fails three times in an hour. This doubles as the audit trail for actions: «перезапусти
+octopus-browser» is recorded with the actor and the exit code, not just printed in the chat.
+
+**Evidence lines.** The same day's incident (14 project agents reporting a clean tree nobody could
+read) is closed structurally: `lib/report.sh` gained `report_proof "<command>"` — the command a
+claim came from — and `report_unknown "<what could not be read>"`, so "I could not look" is a
+first-class answer instead of an empty report. `project-check.sh` already cites its git commands.

@@ -68,6 +68,35 @@ PROJECT_AGENTS_DIR = CONFIG_DIR / "projects"
 SKILLS_DIR = Path("/opt/hermes/skills")
 STATE_DIR = Path("/var/lib/hermes-agents")
 LOG_DIR = STATE_DIR / "logs"
+
+# ── история прогонов ────────────────────────────────────────────────────────────
+# У каждого запуска обработчика уже был свой файл-журнал, но их никто не сводил: на вопрос
+# «падал ли этот агент хоть раз?» приходилось грепать тысячи файлов руками, а «что агенты
+# делали ночью» — это листинг каталога. Одна строка JSONL на запуск: что, для кого, чем
+# кончилось. Файл только дописывается и режется по размеру, поэтому история не теряется.
+HISTORY_FILE = STATE_DIR / "history.jsonl"
+HISTORY_MAX_BYTES = 5 * 1024 * 1024
+HISTORY_KEEP = 3
+HISTORY_SKIP_ARGS = ("message", "text", "prompt", "token", "password")
+
+
+def history_append(record: dict) -> None:
+    """Дописать одну запись о прогоне. Не бросает исключений: учёт не должен ломать работу."""
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        if HISTORY_FILE.exists() and HISTORY_FILE.stat().st_size > HISTORY_MAX_BYTES:
+            oldest = STATE_DIR / f"history.jsonl.{HISTORY_KEEP}"
+            if oldest.exists():
+                oldest.unlink()
+            for i in range(HISTORY_KEEP - 1, 0, -1):
+                src = STATE_DIR / f"history.jsonl.{i}"
+                if src.exists():
+                    src.rename(STATE_DIR / f"history.jsonl.{i + 1}")
+            HISTORY_FILE.rename(STATE_DIR / "history.jsonl.1")
+        with HISTORY_FILE.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as e:  # noqa: BLE001
+        log(f"history: запись не удалась ({type(e).__name__}: {e})")
 MAX_CONCURRENT = 2
 OUTPUT_LIMIT = 6000
 
@@ -266,6 +295,22 @@ def run_handler(agent: Agent, handler: str, args: dict, actor: str) -> dict:
     logfile.write_text(f"$ {cmd}\n# handler={handler} agent={agent.id} actor={actor} "
                        f"args={json.dumps(args, ensure_ascii=False)}\n"
                        f"# exit={code} took={took:.2f}s\n--- stdout ---\n{out}\n--- stderr ---\n{err}\n")
+    # Аудит-след: агент помнит, что он делал и чем это закончилось. Для слов вида «перезапусти
+    # octopus-browser» это ещё и запись «кто попросил и что из этого вышло».
+    _lines = (out or err or "").strip().splitlines()
+    history_append({
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "epoch": int(time.time()),
+        "agent": agent.id,
+        "handler": handler,
+        "actor": actor,
+        "code": code,
+        "took_ms": int(took * 1000),
+        "log": str(logfile),
+        "args": {k: str(v)[:60] for k, v in args.items()
+                 if k.lower() not in HISTORY_SKIP_ARGS},
+        "summary": _lines[0][:160] if _lines else "",
+    })
     body = out if out else err
     if len(body) > OUTPUT_LIMIT:
         body = body[:OUTPUT_LIMIT] + f"\n… truncated ({len(out)} bytes; full log: {logfile})"

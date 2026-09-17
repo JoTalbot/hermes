@@ -519,9 +519,69 @@ def probe_projects() -> list[str]:
     return out
 
 
+def probe_agent_history() -> list[str]:
+    """Что агенты реально сделали: запуски, ошибки и p95 по каждому агенту.
+
+    До этого экспортёр видел только процесс runtime (жив/мёртв) и ничего о его работе:
+    обработчик мог падать на каждом запуске, и ни одна метрика не двигалась. Счётчики
+    берутся из истории прогонов, которую пишет сам runtime (строка JSON на запуск).
+    """
+    path = os.environ.get("HERMES_HISTORY_FILE", "/var/lib/hermes-agents/history.jsonl")
+    out = [
+        "# HELP hermes_agent_history_present 1 if the agent run history is readable",
+        "# TYPE hermes_agent_history_present gauge",
+        "# HELP hermes_agent_history_records Handler runs in the retained history",
+        "# TYPE hermes_agent_history_records gauge",
+        "# HELP hermes_agent_runs_total Handler runs per agent (retained window)",
+        "# TYPE hermes_agent_runs_total counter",
+        "# HELP hermes_agent_failures_1h Failed handler runs per agent in the last hour",
+        "# TYPE hermes_agent_failures_1h gauge",
+        "# HELP hermes_agent_duration_p95_ms 95th percentile handler duration per agent",
+        "# TYPE hermes_agent_duration_p95_ms gauge",
+        "# HELP hermes_agent_last_run_timestamp_seconds Unix time of the agent's last run",
+        "# TYPE hermes_agent_last_run_timestamp_seconds gauge",
+    ]
+    per: dict[str, dict] = {}
+    total = 0
+    now = time.time()
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                name = str(r.get("agent", "?"))
+                a = per.setdefault(name, {"runs": 0, "fail1h": 0, "dur": [], "last": 0})
+                a["runs"] += 1
+                total += 1
+                a["dur"].append(int(r.get("took_ms") or 0))
+                epoch = int(r.get("epoch") or 0)
+                a["last"] = max(a["last"], epoch)
+                if int(r.get("code") or 0) != 0 and now - epoch <= 3600:
+                    a["fail1h"] += 1
+    except OSError:
+        out.append("hermes_agent_history_present 0")
+        return out
+    out.append("hermes_agent_history_present 1")
+    out.append(f"hermes_agent_history_records {total}")
+    for name, a in sorted(per.items()):
+        lbl = '{agent="%s"}' % name.replace('\\', '').replace('"', '')
+        d = sorted(a["dur"])
+        p95 = d[max(0, min(len(d) - 1, int(round(0.95 * (len(d) - 1)))))] if d else 0
+        out.append(f"hermes_agent_runs_total{lbl} {a['runs']}")
+        out.append(f"hermes_agent_failures_1h{lbl} {a['fail1h']}")
+        out.append(f"hermes_agent_duration_p95_ms{lbl} {p95}")
+        out.append(f"hermes_agent_last_run_timestamp_seconds{lbl} {a['last']}")
+    return out
+
+
 PROBES = (probe_units, probe_host_pressure, probe_shim, probe_balancer, probe_agents, probe_bus,
           probe_github, probe_tailscale, probe_agent_bus, probe_bus_agents,
-          probe_projects)
+          probe_projects, probe_agent_history)
 
 
 class Handler(BaseHTTPRequestHandler):

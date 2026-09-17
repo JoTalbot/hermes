@@ -33,6 +33,7 @@ if [[ -d "$PATH_/.git" ]]; then
     report_bad "git не читает этот репозиторий — состояние НЕИЗВЕСТНО"
     report_info "$(printf '%s' "$GITERR" | head -1 | cut -c1-110)"
     report_info "причина: каталог принадлежит другому пользователю, а агент запущен от $(id -un)"
+    report_proof "git -C $PATH_ rev-parse --verify -q HEAD"
     GIT_UNSAFE=1
   else
     BR=$(git -C "$PATH_" rev-parse --abbrev-ref HEAD 2>/dev/null)
@@ -43,6 +44,7 @@ if [[ -d "$PATH_/.git" ]]; then
     [[ "$DIRT" -eq 0 ]] && report_ok "дерево чистое" || report_warn "изменений: $DIRT"
     [[ "$AHEAD" -eq 0 ]] && report_ok "всё отправлено" || report_warn "не отправлено: $AHEAD"
     [[ "$BEHIND" -eq 0 ]] && report_ok "не отстаёт" || report_warn "отстаёт на $BEHIND коммитов"
+    report_proof "git -C $PATH_ status --porcelain · rev-list --count @{u}..HEAD · HEAD..@{u}"
     report_section "🕐 ПОСЛЕДНИЕ КОММИТЫ"
     git -C "$PATH_" log -3 --format='  %h %ad %s' --date=short 2>/dev/null | cut -c1-96
   fi

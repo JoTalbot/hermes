@@ -149,3 +149,15 @@ groups:
           description: "An agent is silent on a task the owner asked for. Check
             journalctl -u hermes-agents and the agent's own log in
             /var/lib/hermes-agents/logs before assuming the task is still running."
+
+      - alert: HermesAgentFailing
+        expr: hermes_agent_failures_1h >= 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Agent {{ $labels.agent }} failed {{ $value }} times in the last hour"
+          description: "Until now a failing handler was invisible: the per-run logs existed
+            but nothing counted them, so an agent could break and stay broken. The run
+            history lists each failure with its exit code and log file — `bash
+            agents/checks/history.sh` (or «что делали агенты» in Telegram) shows them."

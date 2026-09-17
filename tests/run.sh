@@ -332,6 +332,48 @@ if ls /var/backups/hermes/hermes-nodecfg-*.tar.gz >/dev/null 2>&1; then
 else
   ((SKIP++)); echo "  ~ nodecfg backup check skipped (бэкап ещё не делался здесь)"
 fi
+echo "[15] agents remember their runs and show their evidence"
+ck "report.sh carries the evidence convention" "report_proof()" \
+   "$(grep -o 'report_proof()' agents/checks/lib/report.sh | head -1)"
+ck "report.sh can say «посмотреть не удалось»" "report_unknown()" \
+   "$(grep -o 'report_unknown()' agents/checks/lib/report.sh | head -1)"
+ck "runtime records who ran what" '"agent": agent.id' \
+   "$(grep -o '"agent": agent.id' agents/runtime.py | head -1)"
+ck "runtime records on whose behalf" '"actor": actor' \
+   "$(grep -o '"actor": actor' agents/runtime.py | head -1)"
+ck "runtime keeps what the owner typed out of the history" "HISTORY_SKIP_ARGS" \
+   "$(grep -o 'HISTORY_SKIP_ARGS' agents/runtime.py | head -1)"
+ck "the history file is bounded by rotation, not growth" "HISTORY_MAX_BYTES" \
+   "$(grep -o 'HISTORY_MAX_BYTES' agents/runtime.py | head -1)"
+ck "history never breaks the work it records" "history_append" \
+   "$(grep -o 'history_append' agents/runtime.py | head -1)"
+ck "history.sh is the readable view of that file" "ЧТО ДЕЛАЛИ АГЕНТЫ" \
+   "$(grep -o 'ЧТО ДЕЛАЛИ АГЕНТЫ' agents/checks/history.sh | head -1)"
+ck "project-check cites the command behind its git verdict" "report_proof" \
+   "$(grep -o 'report_proof' agents/checks/project-check.sh | head -1)"
+ck "the exporter counts failed runs per agent" "hermes_agent_failures_1h" \
+   "$(grep -o 'hermes_agent_failures_1h' scripts/hermes_metrics_exporter.py | head -1)"
+ck "a failing agent fires an alert now" "HermesAgentFailing" \
+   "$(grep -o 'HermesAgentFailing' deploy/monitoring/hermes-agents.rules.yml | head -1)"
+
+HISTLIVE="${HERMES_HISTORY_FILE:-/var/lib/hermes-agents/history.jsonl}"
+PYBIN=".venv-bus/bin/python"; [[ -x "$PYBIN" ]] || PYBIN="/opt/hermes/.venv-bus/bin/python"
+[[ -x "$PYBIN" ]] || PYBIN="python3"
+AG1="$("$PYBIN" agents/runtime.py list 2>/dev/null | grep -o '[^ ]*server-guardian[^ ]*' | head -1)"
+if [[ -n "$AG1" ]]; then
+  BEFORE=$(grep -c . "$HISTLIVE" 2>/dev/null || echo 0)
+  "$PYBIN" agents/runtime.py invoke "$AG1" disk >/tmp/hist-live.out 2>&1 || true
+  AFTER=$(grep -c . "$HISTLIVE" 2>/dev/null || echo 0)
+  ck "live: a real handler run lands in the history" "yes" \
+     "$([[ ${AFTER:-0} -gt ${BEFORE:-0} ]] && echo yes || echo "no ($BEFORE -> $AFTER)")"
+  OUT3="$(ARG_N=50 bash agents/checks/history.sh 2>&1)"
+  ck "live: history.sh reads that run back" "запусков" "$(printf '%s' "$OUT3" | grep -o 'запусков' | head -1)"
+  ck "live: history.sh names its evidence" "доказательство" "$(printf '%s' "$OUT3" | grep -o 'доказательство' | head -1)"
+else
+  ((SKIP++)); ((SKIP++)); ((SKIP++)); echo "  ~ live history checks skipped (агентов в этом чекауте нет)"
+fi
+
+
 echo
 echo "════ $PASS passed · $FAIL failed · $SKIP skipped ════"
 [[ $FAIL -eq 0 ]]
