@@ -53,18 +53,31 @@ echo "=== 3. registry ==="
 "$VENV/bin/python" "$REPO_DIR/agents/runtime.py" list | head -12
 
 echo "=== 4. selftest: local handler, then over the bus ==="
-"$VENV/bin/python" "$REPO_DIR/agents/runtime.py" invoke server-guardian identity | head -6 | sed 's/^/  /'
+# Имя агента зависит от scope: на узле с HERMES_AGENT_SCOPE=node id выглядит как
+# "<node>/server-guardian". Жёстко зашитое имя делало этот selftest красным на исправном
+# узле (drill 2026-09-17: "no agent 'server-guardian'").
 FIRST_AGENT="$(HERMES_LOCAL_AGENTS="${HERMES_LOCAL_AGENTS:-all}" REPO_DIR="$REPO_DIR" "$VENV/bin/python" -c '
 import os, sys
 sys.path.insert(0, os.path.join(os.environ["REPO_DIR"], "agents"))
 import runtime
 ids = sorted(runtime.load_agents())
 print(ids[0] if ids else "")' 2>/dev/null)"
-echo "  --- bus request: hermes-bus request --to $FIRST_AGENT 'ping' ---"
-if hermes-bus request --to "${FIRST_AGENT:-server-guardian}" --timeout 90 "ping" 2>&1 | head -8 | sed 's/^/  /'; then
+"$VENV/bin/python" "$REPO_DIR/agents/runtime.py" invoke "${FIRST_AGENT:-server-guardian}" identity 2>&1 | head -6 | sed 's/^/  /'
+echo "  --- bus request: hermes-bus request --to ${FIRST_AGENT:-server-guardian} 'ping' ---"
+if hermes-bus request --to "${FIRST_AGENT:-server-guardian}" --timeout 90 "ping" 2>&1 | awk 'NR <= 8' | sed 's/^/  /'; then
   echo "  bus → agent → bus: OK"
 else
   echo "  bus → agent round trip FAILED (see journalctl -u hermes-agents)"
 fi
 echo
 echo "install-agent-runtime.sh done."
+
+# ---- config gaps that used to fail silently ----
+# models.yaml: without it agents quietly run on built-in defaults; logrotate: without it the
+# agent logs grow forever (FACT 2026-09-17: 23 files, no rules).
+for s in install-model-policy.sh install-logrotate.sh; do
+  # if/then, а не «[[ ]] && ...»: под set -e ложное условие в конце цикла завершает скрипт
+  if [[ -x "$REPO_DIR/scripts/$s" ]]; then
+    bash "$REPO_DIR/scripts/$s" || echo "  WARNING: $s reported a problem (see above)"
+  fi
+done

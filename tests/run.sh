@@ -242,6 +242,69 @@ else
   ((SKIP++)); ((SKIP++))
   echo "  ~ live alerting/protection checks skipped (юниты не установлены здесь)"
 fi
+echo "[14] restore and installation gaps: the things that failed silently"
+ck "wire-agents refuses to run without a YAML-capable interpreter" \
+   "не умеет читать YAML" "$(grep -o 'не умеет читать YAML' scripts/wire-agents.sh | head -1)"
+ck "wire-agents prefers the bus venv (system python3 may lack PyYAML)" \
+   ".venv-bus/bin/python" "$(grep -o '\${REPO_DIR}/.venv-bus/bin/python' scripts/wire-agents.sh | head -1)"
+ck "install-agent-runtime resolves the node-scoped agent id" \
+   'invoke "${FIRST_AGENT' "$(grep -o 'invoke \"\${FIRST_AGENT' scripts/install-agent-runtime.sh | head -1)"
+ck "restore exports REPO_DIR so install uses the code it restored with" \
+   "export REPO_DIR HERMES_HOME" "$(grep -o 'export REPO_DIR HERMES_HOME' scripts/restore.sh | head -1)"
+ck "restore puts the node config back (allowlist, node role, bus state)" \
+   "node configuration" "$(grep -o 'node configuration' scripts/restore.sh | head -1)"
+ck "restore does not abort on SIGPIPE from head" \
+   "awk 'NR <= 12'" "$(grep -o "awk 'NR <= 12'" scripts/restore.sh | head -1)"
+ck "backup includes node config and bus state" \
+   "nodecfg" "$(grep -o 'hermes-nodecfg-' scripts/backup.sh | head -1)"
+# Проверяем ИМЕННО список включений (строки «for f in ...»), а не комментарий рядом:
+# подстрока «telegram.env» встречается в пояснении и ловилась старым выражением.
+BACKUP_INCLUDES="$(grep -h '^for f in' scripts/backup.sh)"
+ck "backup includes only non-secret node config" "0" \
+   "$(printf '%s' "$BACKUP_INCLUDES" | grep -cE 'telegram\.env|nats\.env|shim\.env|password|credentials')"
+ck "pending tasks expire instead of waiting forever" \
+   "def expire_pending" "$(grep -o 'def expire_pending' agents/runtime.py | head -1)"
+ck "an expired task is reported to the owner" \
+   "def sweep_pending" "$(grep -o 'def sweep_pending' agents/runtime.py | head -1)"
+ck "overdue tasks are exported as a metric" \
+   "hermes_agents_pending_overdue" "$(grep -o 'hermes_agents_pending_overdue' scripts/hermes_metrics_exporter.py | head -1)"
+ck "a rule fires when a task has no answer for six hours" \
+   "HermesPendingOverdue" "$(grep -o 'HermesPendingOverdue' deploy/monitoring/hermes-agents.rules.yml | head -1)"
+ck "the /pending report knows about the TTL" \
+   "старше" "$(grep -o 'старше' agents/checks/orchestrator-pending.sh | head -1)"
+ck "log rotation is shipped as a rule" \
+   "copytruncate" "$(grep -o 'copytruncate' deploy/logrotate/hermes | head -1)"
+ck "log rotation runs as root without a signal to the writer" \
+   "su root root" "$(grep -o 'su root root' deploy/logrotate/hermes | head -1)"
+ck "the model policy has its own installer" \
+   "MODEL-POLICY: OK" "$(grep -o 'MODEL-POLICY: OK' scripts/install-model-policy.sh | head -1)"
+ck "install.sh checks both config gaps" "install-model-policy.sh" \
+   "$(grep -o 'install-model-policy.sh' scripts/install.sh | head -1)"
+ck "bootstrap.sh checks both config gaps" "install-logrotate.sh" \
+   "$(grep -o 'install-logrotate.sh' scripts/bootstrap.sh | head -1)"
+ck "install-agent-runtime.sh checks both config gaps" "install-model-policy.sh" \
+   "$(grep -o 'install-model-policy.sh' scripts/install-agent-runtime.sh | head -1)"
+if [[ -s config/models.yaml ]]; then
+  if bash scripts/install-model-policy.sh --check >/tmp/mp.out 2>&1; then
+    ck "live: the model policy actually loads" "MODEL-POLICY: OK" "$(grep -o 'MODEL-POLICY: OK' /tmp/mp.out | head -1)"
+  else
+    ck "live: the model policy actually loads" "MODEL-POLICY: OK" "$(tail -1 /tmp/mp.out)"
+  fi
+else
+  ((SKIP++)); echo "  ~ model policy check skipped (нет config/models.yaml в этом дереве)"
+fi
+if [[ -f /etc/logrotate.d/hermes ]]; then
+  ck "live: log rotation is installed here" "LOGROTATE: OK" \
+     "$(bash scripts/install-logrotate.sh --check 2>&1 | grep -o 'LOGROTATE: OK' | head -1)"
+else
+  ((SKIP++)); echo "  ~ logrotate check skipped (правило не установлено здесь)"
+fi
+if ls /var/backups/hermes/hermes-nodecfg-*.tar.gz >/dev/null 2>&1; then
+  ck "live: the newest backup carries node config" "hermes-nodecfg-" \
+     "$(ls -1t /var/backups/hermes/hermes-nodecfg-*.tar.gz | head -1 | sed 's|.*/||' | cut -c1-15)"
+else
+  ((SKIP++)); echo "  ~ nodecfg backup check skipped (бэкап ещё не делался здесь)"
+fi
 echo
 echo "════ $PASS passed · $FAIL failed · $SKIP skipped ════"
 [[ $FAIL -eq 0 ]]

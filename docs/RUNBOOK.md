@@ -539,3 +539,42 @@ Two consequences worth knowing:
 * The Telegram noise filter matches the bus selftest **tag** (`selftest-HHMMSS`), not the bare
   word `selftest`: a real report containing the line `ok agents selftest` used to be
   swallowed, so the owner never saw the result of the task he had just asked for.
+
+## Restore drill on the current code (2026-09-17) and the gaps it found
+
+The drill ran on the spare node (`hermes-node-03` container, hostname `node-arm-03`), from a
+fresh archive into a scratch home, using the code that was being tested:
+
+```bash
+# on the control host
+HERMES_HOME=/home/hermes/.hermes bash scripts/backup.sh         # state + node config arch
+tar -czf /tmp/hermes-newcode.tgz agents bus scripts deploy tests docs config skills memory
+docker cp /tmp/hermes-newcode.tgz hermes-node-03:/tmp/
+docker cp /var/backups/hermes/hermes-state-<stamp>.tar.gz hermes-node-03:/tmp/
+# in the node
+docker exec hermes-node-03 bash -lc 'export HERMES_HOME=/tmp/restored/.hermes; \
+  cd /tmp/hermes-newcode && bash scripts/restore.sh /tmp/hermes-state-<stamp>.tar.gz --force --no-systemd'
+```
+
+Result: `restored 222 files`, `profiles 28 / skills / kanban / memories / config.yaml` all
+present, `restore: PLAUSIBLE`, bus wiring `wired 27 agent config(s)` (6 core + 21 project).
+
+**What the drill broke open** — every one of these was a silent failure before:
+
+| defect | what it looked like | fix |
+|---|---|---|
+| `backup.sh` archived only `$HERMES_HOME` | a restored node came back without `/etc/hermes/telegram.chats.json` (the bot would ignore its owner), `node.env` and the bus state | new `hermes-nodecfg-*.tar.gz` (explicit include list, secrets excluded) and a restore step that never overwrites existing files |
+| `restore.sh` did not export `REPO_DIR` | step 3 ran the node's OWN `/opt/hermes` code, so a "drill on the new code" tested the old code | `export REPO_DIR HERMES_HOME` |
+| `tar … | sed | head -N` under `set -o pipefail` | the script aborted mid-step with no message (SIGPIPE) | `awk 'NR <= N'` |
+| `wire-agents.sh` used system `python3` | without PyYAML it printed `skip … unparseable YAML` 21 times and `wired 0` — a node with no project handlers that still looked installed | use the bus venv, `FATAL` if no YAML-capable interpreter |
+| `install-agent-runtime.sh` hardcoded `server-guardian` | in node scope the id is `<node>/server-guardian`, so its own selftest printed `no agent 'server-guardian'` on a healthy node | resolve the first agent id once and use it |
+| `install-model-policy.sh` used system `python3` | no PyYAML → "файл не читается" although the file was fine | pick the interpreter like `wire-agents.sh`, and report `UNKNOWN` when the checker itself lacks YAML |
+
+## Pending tasks now expire (2026-09-17)
+
+`pending.json` only ever grew: a task was removed when its result arrived, so an agent that
+died on a task left it "in flight" forever. Now the runtime sweeps every 5 minutes and at
+startup (`HERMES_PENDING_TTL`, default 6 h), reports each expiry to `#incidents` (which
+reaches Telegram), exports `hermes_agents_pending_overdue`, and the alert
+`HermesPendingOverdue` fires if anything stays overdue for 15 minutes. `/pending` marks them
+`⏰` instead of showing them as work in progress.

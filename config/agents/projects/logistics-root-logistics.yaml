@@ -89,6 +89,13 @@ bus:
         PROJECT_SLUG: "logistics-root-logistics"
         PROJECT_PATH: "/root/logistics"
         PROJECT_REPO: "https://github.com/JoTalbot/logistics"
+    run:
+      run: bash /opt/hermes/agents/checks/project-run.sh
+      timeout: 180
+      env:
+        PROJECT_SLUG: "logistics-root-logistics"
+        PROJECT_PATH: "/root/logistics"
+        PROJECT_REPO: "https://github.com/JoTalbot/logistics"
     ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

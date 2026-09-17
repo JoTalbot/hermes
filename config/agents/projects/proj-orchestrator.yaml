@@ -89,6 +89,13 @@ bus:
         PROJECT_SLUG: "proj-orchestrator"
         PROJECT_PATH: "/opt/orchestrator"
         PROJECT_REPO: "https://github.com/JoTalbot/orchestrator"
+    run:
+      run: bash /opt/hermes/agents/checks/project-run.sh
+      timeout: 180
+      env:
+        PROJECT_SLUG: "proj-orchestrator"
+        PROJECT_PATH: "/opt/orchestrator"
+        PROJECT_REPO: "https://github.com/JoTalbot/orchestrator"
     ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

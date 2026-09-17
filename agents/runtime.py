@@ -71,6 +71,11 @@ LOG_DIR = STATE_DIR / "logs"
 MAX_CONCURRENT = 2
 OUTPUT_LIMIT = 6000
 
+# Сколько задача может числиться «в работе». Пока ответа нет, задача остаётся в pending;
+# если агент упал или ушёл в переподключение, ответа не будет НИКОГДА, а запись оставалась
+# навсегда: /pending показывал вечно висящие задачи, а файл рос без границ.
+PENDING_TTL = int(os.environ.get("HERMES_PENDING_TTL", str(6 * 3600)))
+
 
 def log(msg: str) -> None:
     print(f"[{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S}] {msg}", flush=True)
@@ -360,6 +365,27 @@ class Runtime:
     def remember(self, corr: str, rec: dict) -> None:
         self.pending[corr] = rec
         self.pending_file.write_text(json.dumps(self.pending, indent=1))
+
+    def expire_pending(self) -> list[dict]:
+        """Снять с ожидания задачи, ответа по которым нет дольше PENDING_TTL.
+
+        Возвращает список снятых записей — вызывающий решает, молчать (старт) или
+        сказать владельцу (периодическая проверка).
+        """
+        now = datetime.now(timezone.utc)
+        gone: list[dict] = []
+        for corr, rec in list(self.pending.items()):
+            try:
+                age = (now - datetime.fromisoformat(
+                    (rec.get("at") or "").replace("Z", "+00:00"))).total_seconds()
+            except Exception:
+                continue          # запись без времени: не трогаем, пусть решает человек
+            if age > PENDING_TTL:
+                gone.append({**rec, "corr": corr, "age": int(age)})
+                self.pending.pop(corr, None)
+        if gone:
+            self.pending_file.write_text(json.dumps(self.pending, indent=1))
+        return gone
 
     def resolve_pending(self, corr: str) -> dict | None:
         rec = self.pending.pop(corr, None)
@@ -659,6 +685,23 @@ class Runtime:
             return
         await self.on_message(nc, agent, env, channel=env.get("channel"))
 
+    async def sweep_pending(self, nc) -> int:
+        """Снять просроченные задачи и сказать об этом владельцу.
+
+        Просроченная задача — это молчание агента, а не «в работе»: владелец ждёт ответа,
+        и узнать об этом он должен сам, а не через /pending на сервере.
+        """
+        gone = self.expire_pending()
+        for rec in gone:
+            log(f"pending expired: {rec.get('corr')} {rec.get('agent')}.{rec.get('handler')}")
+            await self.publish(
+                nc, channel="incidents", kind="error",
+                text=(f"⏰ задача «{(rec.get('task') or '')[:90]}» для {rec.get('agent')} "
+                      f"снята с ожидания: ответа нет {rec['age'] // 3600} ч, обработчик "
+                      f"{rec.get('handler')} не ответил (corr {rec.get('corr')})"),
+                correlation=rec.get("corr"), agent="orchestrator")
+        return len(gone)
+
     async def run(self) -> None:
         import nats
         url, token = nats_conf()
@@ -683,11 +726,16 @@ class Runtime:
                                         f"({', '.join(sorted(roster))[:400]})",
                                    agent="orchestrator")
 
+                for rec in self.expire_pending():
+                    log(f"pending: снято с ожидания после старта — "
+                        f"{rec.get('agent')}.{rec.get('handler')} ({rec['age'] // 60} мин)")
+
                 async def status_watch():
                     while True:
                         await asyncio.sleep(300)
                         if nc.is_closed:
                             return
+                        await self.sweep_pending(nc)
                 asyncio.ensure_future(status_watch())
                 backoff = 2
                 while True:

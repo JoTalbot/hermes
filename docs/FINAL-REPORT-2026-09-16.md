@@ -162,3 +162,43 @@ covers protection, alert delivery, multipart and the tri-state metric).
 honestly reported «в проекте нет ни цели deploy, ни compose-файла» and deployed nothing; a
 1747-character report arrived as a **`.txt` document** (2 KiB) instead of a truncated
 message; `tests/run.sh` **115 passed · 0 failed · 0 skipped**, `agents-selftest` **51/0**.
+
+## Incidents 30–33 and the restore drill (2026-09-17, fifth pass)
+
+30. **The restore drill tested the wrong code.** `restore.sh` sets `REPO_DIR` as a shell
+    variable, not exported, while the installers it calls default to `/opt/hermes`. On the
+    drill node that meant step 3 installed the node's OWN older checkout while the report
+    said "drill on the current code". Fixed with `export REPO_DIR HERMES_HOME`; the drill
+    now wires 27 agents from the code under test.
+
+31. **A node could install with zero project handlers and look fine.** `wire-agents.sh` ran
+    the system `python3`; without PyYAML it printed `skip <slug>: unparseable YAML` 21 times
+    and then `wired 0`. Nobody reads a wall of skips as a failure. It now uses the bus venv
+    (which `install-bus.sh` guarantees has PyYAML) and exits 2 with a FATAL line otherwise.
+
+32. **`tar … | head` silently killed the restore.** Under `set -o pipefail` the early exit of
+    `head` gives SIGPIPE (141) to the upstream command, so step 3b aborted the script before
+    the node configuration was restored — with no error text. Same trap one step earlier had
+    made `install-protection.sh` call installed units "missing" and gate [13] skip its live
+    checks. LESSON (third time): never put `head`/`grep -q` at the end of a pipeline in a
+    script with `pipefail`.
+
+33. **The backup did not contain what a restored node needs to be useful.** `$HERMES_HOME`
+    only — so the Telegram chat allowlist, the node's role and the bus state (offset, alert
+    dedupe, rooms/nodes) were lost, i.e. the restored node would have ignored its owner. New
+    `hermes-nodecfg-*.tar.gz` with an explicit include list; secrets (`telegram.env`,
+    `nats.env`, `shim.env`) are deliberately still absent, and restore never overwrites a
+    file that already exists.
+
+**Drill result (node-arm-03, scratch home):** 222 files restored, 28 profiles, kanban +
+skills + memories + config.yaml present, `restore: PLAUSIBLE`, node config restored
+(allowlist kept existing), `wired 27 agent config(s)`, `MODEL-POLICY: OK`,
+`LOGROTATE: OK`.
+
+**Fifth-pass results (measured):** pending tasks expire (7-hour-old task removed, fresh one
+kept, `#incidents` message delivered to Telegram as message_id=176); logrotate installed and
+accepted by `logrotate -d` (logs: 33 files / 136K, bus state 28 files / 284K); model policy
+verified (`hermes-fast`, 6 agent tiers, 3 escalations, sha256 acb2a140eaf9); backup now
+produces state (568 entries, 71M) + nodecfg (6 files) + config archives, all verified;
+16 alert rules loaded; `tests/run.sh` **139 passed · 0 failed · 0 skipped**,
+`agents-selftest` 51/0.

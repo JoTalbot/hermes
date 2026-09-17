@@ -91,6 +91,15 @@ bus:
         PROJECT_REPO: "https://github.com/JoTalbot/logistics"
         PROJECT_SERVICE: "jo-agent-logistics.service logistics-agent.service logistics-db-migrate.service"
         PROJECT_CONTAINERS: "logistics-collector-collector-1 logistics-collector-enqueuer-1 logistics-collector-normalizer-1 logistics-collector-postgres-1"
+    run:
+      run: bash /opt/hermes/agents/checks/project-run.sh
+      timeout: 180
+      env:
+        PROJECT_SLUG: "logistics"
+        PROJECT_PATH: "/opt/logistics"
+        PROJECT_REPO: "https://github.com/JoTalbot/logistics"
+        PROJECT_SERVICE: "jo-agent-logistics.service logistics-agent.service logistics-db-migrate.service"
+        PROJECT_CONTAINERS: "logistics-collector-collector-1 logistics-collector-enqueuer-1 logistics-collector-normalizer-1 logistics-collector-postgres-1"
     ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

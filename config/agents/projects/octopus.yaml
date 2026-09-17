@@ -92,6 +92,15 @@ bus:
         PROJECT_REPO: "https://github.com/JoTalbot/octopus"
         PROJECT_SERVICE: "octopus-agent-recovery.service octopus-agentmem-vectorize.service octopus-ai-rewriter.service"
         PROJECT_CONTAINERS: "octopus octopus-browser-chromium octopus-child-8300 octopus-child-8301"
+    run:
+      run: bash /opt/hermes/agents/checks/project-run.sh
+      timeout: 180
+      env:
+        PROJECT_SLUG: "octopus"
+        PROJECT_PATH: "/home/ubuntu/octopus-deploy-work"
+        PROJECT_REPO: "https://github.com/JoTalbot/octopus"
+        PROJECT_SERVICE: "octopus-agent-recovery.service octopus-agentmem-vectorize.service octopus-ai-rewriter.service"
+        PROJECT_CONTAINERS: "octopus octopus-browser-chromium octopus-child-8300 octopus-child-8301"
     ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

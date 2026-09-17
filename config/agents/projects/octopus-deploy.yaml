@@ -89,6 +89,13 @@ bus:
         PROJECT_SLUG: "octopus-deploy"
         PROJECT_PATH: "/opt/octopus-deploy"
         PROJECT_REPO: "https://github.com/JoTalbot/octopus-deploy"
+    run:
+      run: bash /opt/hermes/agents/checks/project-run.sh
+      timeout: 180
+      env:
+        PROJECT_SLUG: "octopus-deploy"
+        PROJECT_PATH: "/opt/octopus-deploy"
+        PROJECT_REPO: "https://github.com/JoTalbot/octopus-deploy"
     ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

@@ -139,3 +139,13 @@ groups:
           description: "The path is there, the exporter is not allowed to look at it. Either
             grant traverse rights (setfacl -m u:hermes:x /home/ubuntu) or ignore this alert
             knowingly — but never mistake it for a missing project."
+      - alert: HermesPendingOverdue
+        expr: hermes_agents_pending_overdue > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} task(s) have had no answer for over 6 hours"
+          description: "An agent is silent on a task the owner asked for. Check
+            journalctl -u hermes-agents and the agent's own log in
+            /var/lib/hermes-agents/logs before assuming the task is still running."

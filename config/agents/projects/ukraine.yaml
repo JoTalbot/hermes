@@ -90,6 +90,14 @@ bus:
         PROJECT_PATH: "/opt/orchestrator/projects/ukraine"
         PROJECT_REPO: "https://github.com/JoTalbot/ukraine"
         PROJECT_SERVICE: "jo-agent-ukraine.service"
+    run:
+      run: bash /opt/hermes/agents/checks/project-run.sh
+      timeout: 180
+      env:
+        PROJECT_SLUG: "ukraine"
+        PROJECT_PATH: "/opt/orchestrator/projects/ukraine"
+        PROJECT_REPO: "https://github.com/JoTalbot/ukraine"
+        PROJECT_SERVICE: "jo-agent-ukraine.service"
     ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

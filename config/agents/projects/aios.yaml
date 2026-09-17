@@ -90,6 +90,14 @@ bus:
         PROJECT_PATH: "/opt/aios"
         PROJECT_REPO: "https://github.com/JoTalbot/AIOS"
         PROJECT_SERVICE: "octopus-aios-evolution.service octopus-aios.service octopus-browser-aios-adapter.service"
+    run:
+      run: bash /opt/hermes/agents/checks/project-run.sh
+      timeout: 180
+      env:
+        PROJECT_SLUG: "aios"
+        PROJECT_PATH: "/opt/aios"
+        PROJECT_REPO: "https://github.com/JoTalbot/AIOS"
+        PROJECT_SERVICE: "octopus-aios-evolution.service octopus-aios.service octopus-browser-aios-adapter.service"
     ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

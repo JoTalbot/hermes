@@ -28,6 +28,7 @@ and no agent ever sees a provider key — only the gateway URL and its single cl
 from __future__ import annotations
 
 import json
+import sys
 import os
 import re
 import time
@@ -76,16 +77,44 @@ DEFAULT_POLICY = {
 }
 
 
+_POLICY_WARNED = False
+POLICY_STATE = {"source": "defaults", "file": str(POLICY_FILE), "note": ""}
+
+
+def policy_status() -> str:
+    """Откуда взята политика: «file:<путь>» или «defaults:<причина>».
+
+    Нужно тестам и диагностике: молчаливый откат на встроенные умолчания — это не
+    «всё в порядке», это потеря политики владельца (см. scripts/install-model-policy.sh).
+    """
+    policy()
+    return (f"file:{POLICY_STATE['file']}" if POLICY_STATE["source"] == "file"
+            else f"defaults:{POLICY_STATE['note'] or 'unknown'}")
+
+
 def policy() -> dict:
+    global _POLICY_WARNED
     data = json.loads(json.dumps(DEFAULT_POLICY))       # deep copy
-    if yaml is not None and POLICY_FILE.exists():
+    if yaml is None:
+        POLICY_STATE.update(source="defaults", note="PyYAML отсутствует")
+    elif not POLICY_FILE.exists():
+        POLICY_STATE.update(source="defaults", note=f"нет файла {POLICY_FILE}")
+    else:
         try:
             loaded = yaml.safe_load(POLICY_FILE.read_text()) or {}
             data.update({k: v for k, v in loaded.items() if k != "agents"})
             data["agents"] = {**DEFAULT_POLICY["agents"], **(loaded.get("agents") or {})}
             data["escalate"] = {**DEFAULT_POLICY["escalate"], **(loaded.get("escalate") or {})}
-        except Exception:
-            pass
+            POLICY_STATE.update(source="file", note="")
+        except Exception as e:
+            POLICY_STATE.update(source="defaults",
+                                note=f"{POLICY_FILE} не разбирается: {type(e).__name__}: {e}")
+    if POLICY_STATE["source"] != "file" and not _POLICY_WARNED:
+        _POLICY_WARNED = True
+        # Один раз за процесс: иначе шум в каждом ответе.
+        print(f"models: политика НЕ прочитана ({POLICY_STATE['note']}) — работаю на "
+              f"встроенных умолчаниях; починить: scripts/install-model-policy.sh",
+              file=sys.stderr, flush=True)
     return data
 
 

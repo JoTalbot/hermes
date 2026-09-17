@@ -90,6 +90,14 @@ bus:
         PROJECT_PATH: "/opt/orchestrator/projects/transcribe"
         PROJECT_REPO: "https://github.com/JoTalbot/transcribe"
         PROJECT_SERVICE: "jo-agent-transcribe.service octopus-audio-transcribe.service"
+    run:
+      run: bash /opt/hermes/agents/checks/project-run.sh
+      timeout: 180
+      env:
+        PROJECT_SLUG: "transcribe"
+        PROJECT_PATH: "/opt/orchestrator/projects/transcribe"
+        PROJECT_REPO: "https://github.com/JoTalbot/transcribe"
+        PROJECT_SERVICE: "jo-agent-transcribe.service octopus-audio-transcribe.service"
     ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

@@ -11,6 +11,10 @@ for a in "${@:2}"; do
 done
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+# Экспорт обязателен: install-bus.sh и install-agent-runtime.sh читают REPO_DIR из
+# окружения и без него цепляются к СВОЕМУ /opt/hermes. В дрилле 2026-09-17 из-за этого шаг
+# установки молча выполнялся старым кодом узла, а «дрилл на новом коде» проверял не то.
+export REPO_DIR HERMES_HOME
 [[ -f "$ARCHIVE" ]] || { echo "no such archive: $ARCHIVE"; exit 1; }
 tar -tzf "$ARCHIVE" >/dev/null 2>&1 || { echo "archive fails integrity check — refusing"; exit 1; }
 echo "PLAN"
@@ -42,7 +46,7 @@ while IFS= read -r d; do
 done < <(find "$SCRATCH" -type d -name "$WANT" 2>/dev/null; find "$SCRATCH" -mindepth 1 -maxdepth 3 -type d 2>/dev/null)
 if [[ -z "$CANDIDATE" ]]; then
   echo "  FAILED: could not find a '$WANT'-shaped state directory inside the archive."
-  echo "  Archive top-level entries:"; tar -tzf "$ARCHIVE" | head -5 | sed 's/^/    /'
+  echo "  Archive top-level entries:"; tar -tzf "$ARCHIVE" | sed 's/^/    /' | awk 'NR <= 5'
   exit 1
 fi
 echo "  found state dir inside archive: ${CANDIDATE#$SCRATCH/}"
@@ -56,6 +60,35 @@ if [[ "$MODE" == "node" ]]; then
 else
   echo "--- 3/4 install (idempotent) ---"; bash "$REPO_DIR/scripts/install.sh"
 fi
+echo "--- 3b/4 node configuration (allowlist, node role, bus state) ---"
+# The state archive never contained these (they live outside HERMES_HOME), which is how a
+# restored node could come back "healthy" but functionally mute: the Telegram allowlist was
+# empty, so the bot ignored its owner. Restored from hermes-nodecfg-*.tar.gz if present.
+NODECFG="$(ls -1t "$(dirname "$ARCHIVE")"/hermes-nodecfg-*.tar.gz 2>/dev/null | head -1)"
+if [[ -n "$NODECFG" ]]; then
+  echo "  from $(basename "$NODECFG")"
+  # awk вместо `head -12`: под `set -o pipefail` ранний выход head даёт SIGPIPE, sed
+  # умирает с 141, и скрипт молча обрывается прямо здесь — уже случалось в дрилле.
+  tar -tzf "$NODECFG" | sed 's|^\./|    |' | awk 'NR <= 12' 
+  # Explicitly refuse to overwrite secrets that exist on this host; add only what is missing.
+  TMPC="$(mktemp -d)"; tar -xzf "$NODECFG" -C "$TMPC"
+  for rel in etc/hermes/telegram.chats.json etc/hermes/node.env etc/hermes/alerts.env \
+             var/lib/hermes-bus/tg-offset.json var/lib/hermes-bus/alert-state.json \
+             var/lib/hermes-agents/pending.json; do
+    src="$TMPC/$rel"; dst="/$rel"
+    [[ -f "$src" ]] || continue
+    if [[ -f "$dst" ]]; then
+      echo "    keeping existing $dst (не перезаписываю)"
+    else
+      install -D -m 0644 "$src" "$dst" && echo "    restored $dst"
+    fi
+  done
+  rm -rf "$TMPC"
+  echo "  secrets (telegram.env, nats.env, shim.env) must be placed BY HAND: they are not in any archive"
+else
+  echo "  no nodecfg archive next to $(basename "$ARCHIVE") — /etc/hermes must be rebuilt by hand"
+fi
+
 echo "--- 4/4 verify: what actually came back ---"
 RESTORED=0
 for probe in profiles skills kanban memories config.yaml; do

@@ -17,7 +17,20 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CHECK=0
 [[ "${1:-}" == "--check" ]] && CHECK=1
 export REPO_DIR CHECK
-python3 - <<'PY'
+# FACT (drill 2026-09-17): на свежем узле системный python3 не имеет PyYAML, и скрипт
+# пропускал ВСЕ проектные агенты строками «skip <slug>: unparseable YAML», после чего
+# гордо печатал «wired 0» — узел выглядел установленным, а агенты были без обработчиков.
+# Берём интерпретатор шины (install-bus.sh ставит туда PyYAML) и падаем громко, если его нет.
+for cand in "${REPO_DIR}/.venv-bus/bin/python" /opt/hermes/.venv-bus/bin/python; do
+  [[ -x "$cand" ]] && { PY="$cand"; break; }
+done
+[[ -n "${PY:-}" ]] || PY="$(command -v python3)"
+if ! "$PY" -c 'import yaml' >/dev/null 2>&1; then
+  echo "FATAL: $PY не умеет читать YAML (нет PyYAML) — wiring не выполнен." >&2
+  echo "       Починить: bash $REPO_DIR/scripts/install-bus.sh  (ставит PyYAML в .venv-bus)" >&2
+  exit 2
+fi
+"$PY" - <<'PY'
 import glob, os, re, subprocess, sys
 
 REPO = os.environ["REPO_DIR"]

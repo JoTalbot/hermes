@@ -88,6 +88,13 @@ bus:
         PROJECT_SLUG: "words-home-ubuntu-batch19-oci"
         PROJECT_PATH: "/home/ubuntu/batch19-oci"
         PROJECT_REPO: "https://github.com/JoTalbot/words"
+    run:
+      run: bash /opt/hermes/agents/checks/project-run.sh
+      timeout: 180
+      env:
+        PROJECT_SLUG: "words-home-ubuntu-batch19-oci"
+        PROJECT_PATH: "/home/ubuntu/batch19-oci"
+        PROJECT_REPO: "https://github.com/JoTalbot/words"
     ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

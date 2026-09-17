@@ -73,6 +73,39 @@ if (( ARCHIVED < MIN_ENTRIES )); then
     exit 2
 fi
 
+# --- 4. node configuration and bus state (NOT the Hermes home) ---------------
+# WHY (drill 2026-09-17): the state archive covers $HERMES_HOME only, so a restored node
+# came back WITHOUT /etc/hermes/telegram.chats.json (the chat allowlist — the bot would
+# ignore its owner), /etc/hermes/node.env (the node's role) and the bus state in
+# /var/lib/hermes-bus (Telegram offset, alert dedupe, room/node registry). None of that is
+# a secret and all of it is state a human would have to retype from memory.
+#
+# Secrets stay OUT: telegram.env, nats.env, shim.env, dashboard.env, *.password,
+# git-credentials are never copied here (see the include list — it is explicit, not a glob).
+NODECFG_ARCHIVE="$DEST/hermes-nodecfg-$STAMP.tar.gz"
+STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
+mkdir -p "$STAGE/etc/hermes" "$STAGE/var/lib/hermes-bus" "$STAGE/var/lib/hermes-agents"
+NFT=0
+copy_if() {  # copy_if <source> <destination>
+    [[ -f "$1" ]] || return 0
+    cp -p "$1" "$2" 2>/dev/null || return 0
+    NFT=$((NFT + 1))
+}
+for f in telegram.chats.json node.env alerts.env; do
+    copy_if "/etc/hermes/$f" "$STAGE/etc/hermes/$f"
+done
+for f in tg-offset.json alert-state.json rooms.json nodes.json; do
+    copy_if "/var/lib/hermes-bus/$f" "$STAGE/var/lib/hermes-bus/$f"
+done
+copy_if "/var/lib/hermes-agents/pending.json" "$STAGE/var/lib/hermes-agents/pending.json"
+if (( NFT > 0 )); then
+    tar --create --gzip --file="$NODECFG_ARCHIVE" -C "$STAGE" .
+    echo "  nodecfg archive: $(basename "$NODECFG_ARCHIVE") — $NFT файлов "\
+         "($(du -h "$NODECFG_ARCHIVE" | cut -f1)); секреты не входят"
+else
+    echo "  nodecfg archive: пропущен (нет ни одного из ожидаемых файлов)"
+fi
+
 # --- 2. config from the repo (cheap, versioned separately by git anyway) ------
 CONFIG_ARCHIVE="$DEST/hermes-config-$STAMP.tar.gz"
 tar --create --gzip --file="$CONFIG_ARCHIVE" \

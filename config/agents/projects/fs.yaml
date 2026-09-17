@@ -90,6 +90,14 @@ bus:
         PROJECT_PATH: "/opt/orchestrator/projects/fs"
         PROJECT_REPO: "https://github.com/JoTalbot/fs"
         PROJECT_SERVICE: "fstrim.service jo-agent-fs.service nfs-common.service"
+    run:
+      run: bash /opt/hermes/agents/checks/project-run.sh
+      timeout: 180
+      env:
+        PROJECT_SLUG: "fs"
+        PROJECT_PATH: "/opt/orchestrator/projects/fs"
+        PROJECT_REPO: "https://github.com/JoTalbot/fs"
+        PROJECT_SERVICE: "fstrim.service jo-agent-fs.service nfs-common.service"
     ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

@@ -150,3 +150,13 @@ fi
 systemctl daemon-reload
 systemctl enable hermes-shim.service hermes-serve.service >/dev/null 2>&1 || log "enable failed (non-fatal if units start manually)"
 log "done. Next: scripts/install-agents.sh, then scripts/doctor.sh"
+
+# ---- config gaps that used to fail silently ----
+# models.yaml: without it agents quietly run on built-in defaults; logrotate: without it the
+# agent logs grow forever (FACT 2026-09-17: 23 files, no rules).
+for s in install-model-policy.sh install-logrotate.sh; do
+  # if/then, а не «[[ ]] && ...»: под set -e ложное условие в конце цикла завершает скрипт
+  if [[ -x "$REPO_DIR/scripts/$s" ]]; then
+    bash "$REPO_DIR/scripts/$s" || echo "  WARNING: $s reported a problem (see above)"
+  fi
+done

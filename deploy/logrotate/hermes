@@ -1,0 +1,32 @@
+# deploy/logrotate/hermes → /etc/logrotate.d/hermes
+#
+# FACT (2026-09-17): /var/lib/hermes-agents/logs держал 23 файла и ни одного правила
+# ротации — каждый запуск проверки пишет новый файл навсегда. На узле с 21 проектным
+# агентом и 151 обработчиком это десятки файлов в сутки: диск кончится не сразу, а
+# «неожиданно», и вместе с ним перестанут писаться логи (а без логов агенты слепые).
+#
+# copytruncate: агент пишет в файл по имени через shell-редирект, поэтому копия + обрезка
+# безопаснее, чем переименование (ротация не должна требовать перезапуска агентов).
+/var/lib/hermes-agents/logs/*.log {
+    daily
+    maxsize 20M
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    su root root
+}
+
+/var/lib/hermes-bus/*.log {
+    weekly
+    maxsize 20M
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    su root root
+}

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 import re
 import sqlite3
 import subprocess
@@ -421,10 +422,26 @@ def probe_bus_agents() -> list[str]:
     out.append(f"hermes_agents_runtime_up {alive}")
 
     try:
+        ttl = int(os.environ.get("HERMES_PENDING_TTL", str(6 * 3600)))
+        now = time.time()
         with open("/var/lib/hermes-agents/pending.json") as fh:
-            out.append(f"hermes_agents_dispatched_pending {len(json.load(fh))}")
+            pending = json.load(fh)
+        overdue = 0
+        for rec in (pending.values() if isinstance(pending, dict) else []):
+            try:
+                ts = datetime.fromisoformat(
+                    (rec.get("at") or "").replace("Z", "+00:00")).timestamp()
+            except Exception:
+                continue
+            if now - ts > ttl:
+                overdue += 1
+        out.append(f"hermes_agents_dispatched_pending {len(pending)}")
+        out.append("# HELP hermes_agents_pending_overdue Задачи без ответа дольше PENDING_TTL")
+        out.append("# TYPE hermes_agents_pending_overdue gauge")
+        out.append(f"hermes_agents_pending_overdue {overdue}")
     except Exception:
         out.append("hermes_agents_dispatched_pending 0")
+        out.append("hermes_agents_pending_overdue 0")
 
     try:
         with open("/var/lib/hermes-bus/nodes.json") as fh:
