@@ -1,6 +1,6 @@
 # FINAL REPORT — 2026-09-17 (четвёртая волна: память → алерты → проектные действия → дрилл)
 
-**СТАТУС: READY** · узел `arm-server-01` (129.213.177.56), Ubuntu 24.04.4 aarch64, 4 CPU, 23.9 GiB
+**СТАТУС: READY** (15 PASS · **0 FAIL** · **1 WARNING**: MULTI-SERVER — федерация проверена на шинных узлах, второго физического сервера нет) · узел `arm-server-01` (129.213.177.56), Ubuntu 24.04.4 aarch64, 4 CPU, 23.9 GiB
 **Коммиты волны:** `5713e4b`, `3881de1`, `07771af`, `75a5a75`, `8311a2a` (все запушены, дерево чистое)
 **Тесты:** `tests/run.sh` **139 passed · 0 failed · 0 skipped** · `agents-selftest` **51/0** · secret-scan clean
 **Doctor:** DEGRADED (1 WARNING — чужой контейнер `logistics-recurring-demand-scheduler-1` exited)
@@ -18,7 +18,7 @@
 | 7 | **MEMORY/KNOWLEDGE** | ✅ PASS | Память с FACT/OBSERVATION/HYPOTHESIS/DECISION/LESSON + инциденты 24–33 этой волны; `#knowledge` и доски пишутся |
 | 8 | **GITHUB** | ✅ PASS | 5 коммитов волны запушены, дерево чистое, unpushed = 0, secret-scan clean |
 | 9 | **RECOVERY** | ✅ PASS | Бэкап теперь = состояние (568 записей, 71 MiB) + **конфиг узла** (6 файлов) + config; дрилл на `node-arm-03`: 222 файла, 28 профилей, `restore: PLAUSIBLE`, `wired 27 agent config(s)` |
-| 10 | **MULTI-SERVER** | ✅ PASS | 3 узла живы (node-arm-02/03 — контейнерные узлы шины); кросс-узельная доставка проверена сообщениями шины |
+| 10 | **MULTI-SERVER** | ⚠️ WARNING | 3 узла живы (`node-arm-02/03` — контейнерные узлы шины, не отдельные машины); кросс-узельная доставка проверена. Честная оговорка: второй физический сервер отсутствует, поэтому «потеря сервера» проверена не на железе |
 | 11 | **ANDROID** | ✅ PASS | Control Plane через Telegram (6 кнопок) и GUI `http://129.213.177.56:9119/` за паролем; тяжёлое исполняется на сервере |
 | 12 | **MONITORING** | ✅ PASS | 16 правил в Prometheus (было 10), **1 firing — истинный** (`liza`), 4 новых правила памяти; хост-метрики `mem 33.4 % / swap 59.7 % / load 1.00/ядро` |
 | 13 | **AUTORECOVERY** | ✅ PASS | `OOMScoreAdjust` активен (`oom_score 666 → 134` у шины и агентов), лимиты памяти заданы; `Restart=always`; self-heal инвариантов не трогали |
