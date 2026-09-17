@@ -50,6 +50,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import os
 import subprocess
 import sys
@@ -62,6 +63,33 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bus import CHANNELS, STATE_DIR, envelope, mirror_local, node_name, server_id  # noqa: E402
 
 NATS_ENV = "/etc/hermes/nats.env"
+
+# Telegram renders HTML in messages: bold headers, monospace output. Every dynamic part is
+# escaped (see esc) so that agent output containing < or & cannot break the message — and a
+# message that fails to parse is a message the owner never sees.
+KIND_STYLE = {
+    "event":    ("📣", "СОБЫТИЕ"),
+    "decision": ("⚖️", "РЕШЕНИЕ"),
+    "task":     ("🧩", "ЗАДАЧА"),
+    "result":   ("✅", "РЕЗУЛЬТАТ"),
+    "error":    ("❌", "ОШИБКА"),
+    "status":   ("📊", "СТАТУС"),
+    "request":  ("❓", "ЗАПРОС"),
+    "reply":    ("💬", "ОТВЕТ"),
+}
+PRIO_MARK = {"urgent": "🔥 ", "high": "❗ ", "normal": "", "low": "· "}
+
+
+MAIN_KEYBOARD = {
+    "keyboard": [[{"text": "📊 Статус"}, {"text": "🗞 Сводка"}],
+                 [{"text": "🖧 Узлы"}, {"text": "❓ Помощь"}]],
+    "resize_keyboard": True,
+    "is_persistent": True,
+}
+
+
+def esc(text: str) -> str:
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 TG_ENV = "/etc/hermes/telegram.env"
 TG_CHATS = "/etc/hermes/telegram.chats.json"
 STREAM = "AGENT_BUS"
@@ -122,7 +150,8 @@ def tg_chat() -> dict | None:
 _rate_state = {"window": 0, "count": 0}
 
 
-def tg_send(text: str, channel: str | None = None, force: bool = False) -> tuple[bool, str]:
+def tg_send(text: str, channel: str | None = None, force: bool = False,
+            keyboard: bool = False) -> tuple[bool, str]:
     token = tg_token()
     chat = tg_chat()
     if not token:
@@ -136,7 +165,9 @@ def tg_send(text: str, channel: str | None = None, force: bool = False) -> tuple
     if not force and _rate_state["count"] >= RATE_LIMIT_PER_MIN:
         return False, "rate limit (bus message flood suppressed)"
     payload = {"chat_id": chat["chat_id"], "text": text,
-               "disable_web_page_preview": True}
+               "parse_mode": "HTML", "disable_web_page_preview": True}
+    if keyboard:
+        payload["reply_markup"] = MAIN_KEYBOARD
     # Forum groups: route each channel to its topic, so #security is a topic, not a wall.
     topic = (chat.get("topics") or {}).get(channel or "")
     if chat.get("is_forum") and topic:
@@ -144,6 +175,10 @@ def tg_send(text: str, channel: str | None = None, force: bool = False) -> tuple
     try:
         r = tg_api(token, "sendMessage", payload)
         _rate_state["count"] += 1
+        if r.get("ok"):
+            # Logged (not just failures): "did my message actually leave the node?" is the
+            # first question when the owner says the chat is quiet.
+            log(f"telegram: sent message_id={(r.get('result') or {}).get('message_id')}")
         return bool(r.get("ok")), "sent" if r.get("ok") else str(r.get("description"))
     except Exception as e:
         return False, f"{type(e).__name__}: {e}"
@@ -230,16 +265,43 @@ def should_forward(env: dict) -> bool:
     copies to the owner's phone on an N-node federation. "Forward what I published"
     yields exactly one notification per message and stays correct as nodes are added.
     """
+    # Channel traffic tells the story (task -> dispatch -> result); agent-to-agent DMs are
+    # internal wiring and were landing in the owner's chat as "личка → server-guardian".
+    # Errors are kept whatever their routing: a failure is never noise.
+    text = (env.get("text") or "").lower()
     return (env.get("kind") in MEANINGFUL_KINDS
             and env.get("priority") != "low"
-            and env.get("node") == server_id())
+            and env.get("node") == server_id()
+            and (env.get("channel") or env.get("kind") == "error")
+            # The bus selftest publishes to real channels (that is how it proves mirroring
+            # and priorities). Its messages are tagged "selftest" and are the only thing
+            # filtered here: tests must exercise the real path without pinging the owner.
+            and "selftest" not in text)
 
 
 def tg_line(env: dict) -> str:
-    where = f"#{env['channel']}" if env.get("channel") else f"→{env.get('to')}"
-    refs = ("\n" + "\n".join(f"• {r}" for r in env.get("refs") or [])) if env.get("refs") else ""
-    return (f"{env['kind'].upper()} {where} · {env['from']}@{env['server']}\n"
-            f"{env['text'][:1200]}{refs}")
+    """One message the owner can read at a glance: what kind, where, from whom, what."""
+    kind = env.get("kind") or "event"
+    icon, title = KIND_STYLE.get(kind, ("•", str(kind).upper()))
+    mark = PRIO_MARK.get(env.get("priority") or "normal", "")
+    where = f"#{env['channel']}" if env.get("channel") else f"личка → {env.get('to')}"
+    body = (env.get("text") or "").strip()
+    if len(body) > 1200:
+        body = body[:1200] + "…"
+    # Agent output is usually a shell report: monospace keeps its columns readable.
+    if body.count("\n") >= 1 or kind in ("result", "error", "status"):
+        shown = f"<pre>{esc(body[:900])}</pre>"
+    else:
+        shown = esc(body)
+    lines = [f"{mark}{icon} <b>{title}</b> · {esc(where)}",
+             f"👤 {esc(env.get('from') or '?')} @ {esc(env.get('server') or '?')}",
+             "",
+             shown]
+    if env.get("correlation_id"):
+        lines.append(f"\n🔗 corr <code>{esc(env['correlation_id'])}</code>")
+    for r in (env.get("refs") or [])[:3]:
+        lines.append(f"• {esc(r)}")
+    return "\n".join(lines)
 
 
 # ── Telegram -> bus: the owner's control plane ───────────────────────────────
@@ -289,25 +351,32 @@ def _run(args: list[str], limit: int = TG_MAX_TEXT - 200) -> str:
 
 def owner_status() -> str:
     import urllib.request as u
-    lines = [f"Hermes node {server_id()} ({node_name()})"]
-    units = ["nats-server", "hermes-bus-bridge", "hermes-agents", "hermes-serve",
-             "hermes-gateway", "hermes-shim"]
-    states = []
+    lines = [f"🖥 <b>{esc(server_id())}</b> · узел на шине"]
+    units = ["nats-server", "hermes-bus-bridge", "hermes-telegram-inbox", "hermes-agents",
+             "hermes-serve", "hermes-gateway", "hermes-shim", "hermes-metrics"]
+    states, down = [], []
     for u_ in units:
         try:
             st = subprocess.run(["systemctl", "is-active", u_], capture_output=True,
                                 text=True, timeout=10).stdout.strip() or "unknown"
         except Exception:
             st = "unknown"
-        states.append(f"{u_}={st}")
-    lines.append("units: " + ", ".join(states))
+        states.append(f"{'✅' if st == 'active' else ('⚪️' if st == 'inactive' else '❌')} {u_}")
+        if st == "failed":
+            down.append(u_)
+    lines.append("⚙️ <b>Юниты</b> " + ("все активны" if not down else f"❌ {len(down)} сбоят"))
+    lines.append("<pre>" + esc("\n".join(states)) + "</pre>")
     # Bus numbers come from the bridge's own view (always current); the exporter is only a
     # fallback because its stream gauges are absent whenever its scrape of NATS' monitoring
     # endpoint fails, and "?" in the owner's chat is worse than no line at all.
+    bus_lines = []
     st = _run(["/usr/local/bin/hermes-bus-bridge", "status"], limit=1200)
     for ln in st.splitlines():
-        if ln.strip().startswith(("stream", "consumer")) or "ack_pending" in ln:
-            lines.append("bus: " + ln.strip())
+        if ln.strip().startswith("stream") or "ack_pending" in ln:
+            bus_lines.append(ln.strip())
+    if bus_lines:
+        lines.append("📨 <b>Шина</b>")
+        lines.append("<pre>" + esc("\n".join(bus_lines)) + "</pre>")
     try:
         m = u.urlopen("http://127.0.0.1:9725/metrics", timeout=8).read().decode()
         def val(name: str) -> str:
@@ -315,13 +384,18 @@ def owner_status() -> str:
                 if ln.startswith(name + " "):
                     return ln.split()[-1]
             return "?"
-        lines.append(f"agents: defined={val('hermes_agents_defined')} "
-                     f"runtime_up={val('hermes_agents_runtime_up')} "
-                     f"nodes_known={val('hermes_nodes_known')}")
-        lines.append(f"projects wired={val('hermes_projects_wired')}")
+        lines.append(f"🤖 <b>Агенты</b> {val('hermes_agents_defined')} определено · "
+                     f"{val('hermes_agents_runtime_up')} runtime · "
+                     f"{val('hermes_nodes_known')} узла на шине")
+        lines.append(f"📦 <b>Проекты</b> {val('hermes_projects_wired')} привязано")
     except Exception as e:
         lines.append(f"metrics: unavailable ({type(e).__name__})")
     return "\n".join(lines)
+
+
+def owner_servers() -> str:
+    return ("🖧 <b>Узлы на шине</b>\n<pre>"
+            + esc(_run(["/usr/local/bin/hermes-bus", "nodes"])) + "</pre>")
 
 
 def owner_digest(arg: str) -> str:
@@ -329,16 +403,25 @@ def owner_digest(arg: str) -> str:
         n = max(1, min(20, int(arg)))
     except (TypeError, ValueError):
         n = 3
-    return _run(["/usr/local/bin/hermes-bus", "digest", "-n", str(n)])
+    return "🗞 <b>Сводка шины</b>\n<pre>" + esc(_run(["/usr/local/bin/hermes-bus",
+                                                      "digest", "-n", str(n)])) + "</pre>"
 
 
-HELP = """Hermes control — команды:
-/status — состояние узла (юниты, шина, агенты)
-/digest [N] — сводка последних N сообщений по каналам
-/task <текст> — задача в #orchestrator (агенты разберут по capability)
-/servers — узлы на шине
-/help — эта справка
-любой другой текст → публикуется в #general как событие"""
+HELP = """🤖 <b>Hermes control</b> — что я умею
+
+🧩 <b>Задача агентам</b> — просто напиши текстом, например:
+    <i>проверить загрузку сервера</i>
+    <i>статус проекта logistics</i>
+    <i>сделать бэкап и проверить его</i>
+🧩 /task &lt;текст&gt; — то же самое явной командой
+
+📊 /status — состояние узла: юниты, шина, агенты, узлы
+🗞 /digest [N] — сводка последних N сообщений по каналам
+🖧 /servers — кто на шине
+📝 /note &lt;текст&gt; — просто событие в #general (без исполнения)
+❓ /help — эта справка
+
+<i>Результат работы агента придёт сюда же отдельным сообщением.</i>"""
 
 
 def handle_owner_text(text: str) -> str:
@@ -347,32 +430,60 @@ def handle_owner_text(text: str) -> str:
     if not t:
         return HELP
     low = t.lower()
-    if low in ("/start", "/help", "help", "/?"):
-        return HELP
+    # The phone keyboard sends its button label as text ("📊 Статус"). Accept the LABEL —
+    # not any sentence that happens to contain the word: "статус проекта hermes-os" is a
+    # task for an agent, and an earlier version of this shortcut swallowed it and answered
+    # with the node status instead. Matching a normalized label is the narrow rule:
+    label = re.sub(r"[^a-zа-я]+", "", t.lower())
+    if label in ("статус", "сводка", "узлы", "помощь", "start", "help"):
+        return {"статус": owner_status, "сводка": lambda: owner_digest("3"),
+                "узлы": owner_servers, "помощь": lambda: HELP,
+                "start": lambda: HELP, "help": lambda: HELP}[label]()
     if low.startswith("/status"):
         return owner_status()
     if low.startswith("/digest"):
         return owner_digest(t.split()[1] if len(t.split()) > 1 else "3")
     if low.startswith("/servers") or low.startswith("/nodes"):
-        return _run(["/usr/local/bin/hermes-bus", "nodes"])
+        return owner_servers()
     if low.startswith("/task"):
         body = t[5:].strip()
         if not body:
-            return "Формат: /task <что сделать>"
+            return "🧩 Формат: <code>/task что сделать</code>"
         return _publish("orchestrator", "task", body)
+    if low.startswith("/note"):
+        body = t[5:].strip()
+        if not body:
+            return "📝 Формат: <code>/note текст события</code>"
+        return _publish("general", "event", body)
     if low.startswith("/"):
-        return "Неизвестная команда.\n\n" + HELP
-    return _publish("general", "event", t)
+        return "🤔 Не знаю такой команды.\n\n" + HELP
+    # Free text in the owner's private chat is an instruction, not a tweet: sending it to
+    # #general as a bare event (the old behaviour) looked like it worked and did nothing.
+    return _publish("orchestrator", "task", t)
 
 
 def _publish(channel: str, kind: str, text: str) -> str:
+    """Publish to the bus. For #orchestrator the agent is ADDRESSED by name.
+
+    A message in a channel is a broadcast — agents act on direct messages and on
+    mentions — so a task without "@orchestrator" was read by nobody and answered by
+    nobody. That is exactly the "I sent a task and nothing happened" the owner saw.
+    """
+    body = f"@orchestrator {text}" if channel == "orchestrator" else text
     r = subprocess.run(["/usr/local/bin/hermes-bus", "post", "--channel", channel,
-                        "--kind", kind, "--priority", "normal", text],
+                        "--kind", kind, "--priority", "normal", body],
                        capture_output=True, text=True, timeout=60)
     out = (r.stdout or r.stderr or "").strip().splitlines()
     mid = out[0].split()[0] if out and out[0] else "?"
-    return (f"{kind} → #{channel}  [{mid}]\n"
-            f"агенты увидят это на шине; зеркало: board agents-chat")
+    if kind == "task":
+        return ("🧩 <b>Задача принята</b>\n"
+                f"🆔 <code>{esc(mid)}</code>\n"
+                f"🎯 маршрут: #orchestrator → подходящий агент\n"
+                f"📝 {esc(text[:400])}\n\n"
+                "<i>Отвечу в этот чат, когда агент закончит.</i>")
+    return ("📝 <b>Событие опубликовано</b>\n"
+            f"🆔 <code>{esc(mid)}</code> · канал #{esc(channel)}\n"
+            f"{esc(text[:400])}")
 
 
 def tg_poll_once(token: str, timeout: int = 25) -> int:
@@ -413,8 +524,13 @@ def tg_poll_once(token: str, timeout: int = 25) -> int:
                 f"— run `bus_bridge.py discover` if this is the owner")
             continue
         log(f"telegram <- {frm.get('username') or cid}: {text[:80]!r}")
+        want_keyboard = text.strip().lower() in ("/start", "/help", "help", "/?")
+        try:      # a visible "typing…" while a handler runs, so silence never looks like death
+            tg_api(token, "sendChatAction", {"chat_id": cid, "action": "typing"}, timeout=10)
+        except Exception:
+            pass
         reply = handle_owner_text(text)
-        ok, detail = tg_send(reply, force=True)
+        ok, detail = tg_send(reply, force=True, keyboard=want_keyboard)
         handled += 1
         if not ok:
             log(f"telegram reply failed: {detail}")
@@ -607,7 +723,7 @@ def main() -> int:
         asyncio.run(run_daemon(rpc_echo=a.rpc_echo))
         return 0
     if a.cmd == "send":
-        ok, detail = tg_send(a.text, force=a.force)
+        ok, detail = tg_send(esc(a.text), force=a.force)
         print(("sent: " if ok else "FAILED: ") + detail)
         return 0 if ok else 1
     if a.cmd == "discover":

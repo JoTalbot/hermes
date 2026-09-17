@@ -44,6 +44,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -56,7 +57,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bus"))
 from bus import (CHANNELS, RPC_PREFIX, SUBJECT_PREFIX, envelope, mirror_local,  # noqa: E402
                  nats_conf, server_id)
 
-CONFIG_DIR = Path("/opt/hermes/config/agents")
+# The registry lives next to the code on a real node; the override exists so the test
+# suite and the chat probe can run from a working copy (or a worktree) instead of silently
+# finding zero agents and reporting every route as "(none)".
+CONFIG_DIR = Path(os.environ.get("HERMES_AGENTS_DIR", "/opt/hermes/config/agents"))
 PROJECT_AGENTS_DIR = CONFIG_DIR / "projects"
 SKILLS_DIR = Path("/opt/hermes/skills")
 STATE_DIR = Path("/var/lib/hermes-agents")
@@ -272,6 +276,40 @@ def skills_index() -> list[dict]:
     return out
 
 
+# Deterministic intent routing for tasks typed by a human. Specific intents first: a
+# request to "сделать бэкап сервера" must not be routed by the generic word "сервер".
+INTENT_RULES: list[tuple[str, str, str]] = [
+    (r"бэкап|backup|восстанов|restore|архив|проверка бэкап", "backup", "бэкапы"),
+    (r"безопасн|security|аудит|audit|фаервол|firewall|секрет|открыт|уязвим|порт", "security",
+     "безопасность"),
+    (r"github|\bgit\b|репозитор|\brepo\b|коммит|commit|пуш|push|ветк|secret-scan|утечк",
+     "github", "git и CI"),
+    (r"мониторинг|monitoring|prometheus|grafana|метрик|metric|алерт|alert|slo|дашборд",
+     "monitoring", "мониторинг"),
+    # generic host keywords last: they match "сервер", which appears in almost everything
+    (r"загрузк|нагрузк|\bload\b|uptime|процессор|\bcpu\b|памят|memory|диск|disk|место|"
+     r"юнит|сервис|service|systemd|journal|журнал|docker|контейнер|хост|сервер|статус|"
+     r"состояни|проверь|проверить",
+     "host-health", "хост и сервисы"),
+]
+
+
+# The owner writes Russian; the registry is in English. A short alias table beats a
+# transliteration engine: it covers the projects that actually get asked about.
+PROJECT_ALIASES: dict[str, str] = {
+    "логистик": "logistics", "логист": "logistics", "logist": "logistics",
+    "октопус": "octopus", "осьминог": "octopus",
+    "слова": "words", "словар": "words",
+    "перевод": "transcribe", "транскрип": "transcribe",
+    "украин": "ukraine", "браузер": "browser", "игр": "game",
+    "мадворлд": "madworld", "балансер": "aios", "баланс": "aios",
+}
+
+
+def caps_of(agents: dict) -> set:
+    return {c for a in agents.values() for c in a.capabilities}
+
+
 def builtin(agent: Agent, handler: str, args: dict) -> dict | None:
     """Handlers that need no shell: introspection and orchestration."""
     if handler == "ping":
@@ -418,13 +456,73 @@ class Runtime:
         return env
 
     # -- orchestrator built-ins ---------------------------------------------
+    def route_by_text(self, task: str) -> tuple[str, str, str]:
+        """Pick a target for a free-text task. Deterministic, no model, no tokens.
+
+        A human writing in the chat ("проверить загрузку сервера") cannot be expected to
+        know capability names. Before this, a task without an explicit capability fell
+        through to "first agent alphabetically" — i.e. `backup` got asked about disk load.
+        The order below is deliberate: a project named in the task is the most specific
+        signal, then the more specific intents, and only then the generic host keywords.
+        Returns (capability, target_agent_id, human-readable reason).
+        """
+        low = (task or "").lower()
+        caps = {c for a in self.agents.values() for c in a.capabilities}
+        # 1. a project named in the task is the strongest signal (longest name first, so
+        #    "words-home-ubuntu-batch19-oci" wins over "words")
+        projects = sorted(((c, c.split(":", 1)[1]) for c in caps
+                           if c.startswith("project:")), key=lambda p: -len(p[1]))
+        # Pass 1: the project's exact name appears in the task. Longest wins, so
+        # "words-home-ubuntu-batch20-oci" is only chosen when written out in full.
+        for cap, name in projects:
+            if re.search(rf"\b{re.escape(name.lower())}\b", low):
+                return cap, "", f"проект «{name}»"
+        # Pass 2: a pointer to the project, not its full name: prefer the SHORTEST project
+        # ("words" over "words-home-ubuntu-batch20-oci") — a human naming a project means
+        # the base one, not a worktree variant.
+        for alias, target in PROJECT_ALIASES.items():
+            if alias in low:
+                hit = [n for _, n in projects if n.lower().startswith(target)]
+                if hit:
+                    return f"project:{min(hit, key=len)}", "", f"проект «{min(hit, key=len)}» (синоним)"
+        for cap, name in sorted(((c, c.split(":", 1)[1]) for c in caps
+                                 if c.startswith("project:")), key=lambda p: len(p[1])):
+            stem = name.split("-")[0]
+            if len(stem) > 4 and stem.lower() in low:
+                return cap, "", f"проект «{name}»"
+        # 2. intent keywords, specific before generic
+        for rx, cap, label in INTENT_RULES:
+            if re.search(rx, low) and cap in caps:
+                return cap, "", label
+        # 3. the task may simply name the agent
+        for tok in re.findall(r"[a-z0-9][a-z0-9\-]{2,}", low):
+            if tok in self.agents and tok != "orchestrator":
+                return "", tok, f"агент «{tok}»"
+        return "", "", ""
+
     async def dispatch(self, nc, agent: Agent, env: dict, channel: str | None) -> None:
         """Route a task to the best-suited agent by capability, then track the reply."""
         text = env.get("text") or ""
         args = env.get("args") or {}
-        task = args.get("task") or text
+        # A task typed in the owner's chat arrives as a channel message with a mention
+        # ("@orchestrator проверить загрузку сервера"): strip the addressing, keep the ask.
+        task = (args.get("task") or re.sub(r"@[\w/\-]+", " ", text)).strip()
+        task = re.sub(r"^(task|задача)\s*[:\-]?\s*", "", task, flags=re.I).strip()
+        task = re.sub(r"\s{2,}", " ", task)
         capability = args.get("capability") or ""
         target = args.get("agent") or ""
+        why = ""
+        if not target and not capability:
+            capability, target, why = self.route_by_text(task)
+            if not capability and not target:
+                known = ", ".join(sorted(c for c in caps_of(self.agents) if not c.startswith("project:")))
+                await self.publish(nc, channel="orchestrator", kind="error",
+                                   text=f"не понял задачу «{task}» — не нашёл ни проекта, ни "
+                                        f"ключевого слова.\nНапиши точнее, например: "
+                                        f"«проверить диски», «сделать бэкап», «аудит безопасности», "
+                                        f"«статус проекта logistics».\nИзвестные возможности: {known}",
+                                   correlation=env.get("id"), agent=agent.id)
+                return
         if not target:
             scored = []
             for a in self.agents.values():
@@ -443,6 +541,8 @@ class Runtime:
                                     f"{', '.join(sorted(self.agents))}",
                                correlation=env.get("id"), agent=agent.id)
             return
+        if why:
+            log(f"routed by text: «{task[:60]}» → {capability or target} ({why})")
         corr = env.get("correlation_id") or uuid.uuid4().hex[:12]
         handler = args.get("handler") or "status"
         self.remember(corr, {"task": task, "agent": target, "handler": handler,
@@ -457,11 +557,18 @@ class Runtime:
 
     async def on_channel(self, nc, agent: Agent, env: dict) -> None:
         text = env.get("text") or ""
-        if f"@{agent.id}" not in text and not env.get("to") == agent.id:
+        addressed = (f"@{agent.id}" in text or env.get("to") == agent.id
+                     or (agent.id == "orchestrator" and env.get("channel") == "orchestrator"
+                         and env.get("kind") == "task"))
+        if not addressed:
             return
         if env.get("from") == agent.id:
             return
-        if agent.id == "orchestrator" and ("dispatch" in text or "задач" in text.lower()):
+        # A task published into #orchestrator (by the owner's chat or by any node) is an
+        # ask to route, not a message to read: without this, such a task sat in the channel
+        # forever and the owner saw no answer.
+        if agent.id == "orchestrator" and (env.get("kind") == "task"
+                                           or "dispatch" in text or "задач" in text.lower()):
             await self.dispatch(nc, agent, env, env.get("channel"))
             return
         await self.on_message(nc, agent, env, channel=env.get("channel"))

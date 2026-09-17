@@ -151,6 +151,18 @@ ck "unknown chats are ignored, never executed" "non-allowlisted" "$(grep -o 'ign
 ck "owner text never reaches a shell" "ok" "$(grep -qE 'handle_owner_text' bus/bus_bridge.py && ! grep -qE 'shell=True|os\.system' bus/bus_bridge.py && echo ok)"
 ck "inbox unit shipped for a new node" "hermes-telegram-inbox.service" "$(grep -o 'hermes-telegram-inbox.service' scripts/install-bus.sh | head -1)"
 ck "inbox unit installed when a chat exists" "hermes-telegram-inbox" "$(systemctl list-unit-files 2>/dev/null | grep -o 'hermes-telegram-inbox' | head -1)"
+echo "[11] owner chat: a task typed in Telegram really reaches an agent"
+PYBIN="/opt/hermes/.venv-bus/bin/python"
+[[ -x "$PYBIN" ]] || PYBIN="$(command -v python3)"
+CHAT_PROBE="$("$PYBIN" tests/probe-chat.py 2>&1)" || true
+ck "free text is routed (not handed to the alphabetically first agent)" "route-host=host-health" "$CHAT_PROBE"
+ck "a named project goes to the base project, not a worktree variant" "route-project=project:logistics" "$CHAT_PROBE"
+ck "a Russian alias for a project is understood" "route-alias=project:logistics" "$CHAT_PROBE"
+ck "an unparsable task is refused, not routed at random" "route-unknown=(none)" "$CHAT_PROBE"
+ck "owner text is HTML-escaped for Telegram" "escape=&lt;b&gt;x&lt;/b&gt; &amp; y" "$CHAT_PROBE"
+ck "forwarded messages carry a readable kind header" "header-has-kind=True" "$CHAT_PROBE"
+ck "multi-line agent output is shown as a monospace block" "body-mono=True" "$CHAT_PROBE"
+ck "internal agent DMs stay off the phone, errors always arrive" "forward=ok" "$CHAT_PROBE"
 echo
 echo "════ $PASS passed · $FAIL failed · $SKIP skipped ════"
 [[ $FAIL -eq 0 ]]

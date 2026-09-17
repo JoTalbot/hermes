@@ -290,26 +290,35 @@ systemctl status hermes-telegram-inbox    # the inbound half (commands -> bus)
 ```
 
 *Out (bus → phone):* the bridge forwards **meaningful** messages — kinds
-event/decision/task/result/error/status, priority ≠ low, max 20/min, and only messages this
-node authored (otherwise an N-node federation sends N copies). Internal model chatter never
-leaves the bus. Forum groups can map each channel to its own topic via
+event/decision/task/result/error/status, priority ≠ low, max 20/min, authored by this node
+(so an N-node federation sends one copy, not N), **channel messages only** (agent-to-agent
+DMs are internal wiring; errors are forwarded whatever their routing), and nothing tagged
+`selftest` (the test suite publishes to real channels and must not ping the owner).
+Agent output is sent as monospace; forum groups can map channels to topics via
 `/etc/hermes/telegram.chats.json` (`topics: {"security": 4}`).
 
-*In (phone → agents):* `hermes-telegram-inbox.service` runs `bus_bridge.py poll` (long poll).
-Commands available in the chat:
+*In (phone → agents):* `hermes-telegram-inbox.service` runs `bus_bridge.py poll` (long poll,
+persistent offset in `/var/lib/hermes-bus/tg-offset.json`). The chat has a keyboard —
+**📊 Статус · 🗞 Сводка · 🖧 Узлы · ❓ Помощь** — and these commands:
 
-| command | effect |
+| what you type | what happens |
 |---|---|
-| `/status` | this node: units, stream/consumer state, agents, nodes, projects |
+| any text, e.g. *проверить загрузку сервера* | **task** for the agents: routed to a specialist, result comes back in the chat |
+| `/task <текст>` | the same, explicitly |
+| `/status` | units, bus stream/consumers, agents, nodes, projects |
 | `/digest [N]` | one-screen summary of the last N messages per channel |
-| `/task <текст>` | publishes a **task** to `#orchestrator`; agents pick it up by capability |
-| `/servers` | the nodes currently on the bus (`hermes-bus nodes`) |
+| `/servers` | who is on the bus |
+| `/note <текст>` | a plain event on `#general` (no execution) |
 | `/help` | the command list |
-| any other text | published to `#general` as an `event` |
 
-Safety properties that are enforced in code, not by convention: only chats persisted by
-`discover` may command the node (anything else is logged and ignored), the command set is a
-fixed dispatch table, and owner text is never interpolated into a shell — the only thing done
-with free text is publishing it on the bus. The update offset is persisted in
-`/var/lib/hermes-bus/tg-offset.json`, so a restart never replays yesterday's commands.
-`doctor` gate 18 fails if a chat is configured but nothing polls it.
+**How a task finds its agent** (`runtime.route_by_text`, deterministic — no model, no
+tokens): 1) a project named in the task (exact name first, longest match; then the *shortest*
+project whose stem matches, plus Russian aliases «логистика/октопус/слова/перевод/…»),
+2) intent keywords, specific before generic (`бэкап` beats `сервер`), 3) the agent's own
+name. A task that matches nothing is **refused with a suggestion list** rather than handed to
+a random agent. The orchestrator must be addressed (`@orchestrator`) — a bare broadcast in a
+channel is read by nobody, which is the incident of 2026-09-17.
+
+Safety properties, enforced in code: only chats persisted by `discover` may command the node
+(anything else is logged and ignored), the command set is a fixed dispatch table, and owner
+text is never interpolated into a shell — free text is only ever *published*.`doctor` gate 18 fails if a chat is configured but nothing polls it.
