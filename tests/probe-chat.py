@@ -122,3 +122,23 @@ print("btn-task-map=%s" % B.BUTTON_TASKS.get("сервер"))
 rt = (ROOT / "agents" / "runtime.py").read_text()
 print("refusal-friendly=%s" % ("🤔 Не понял" in rt and "Известные возможности" not in rt))
 print("refusal-has-examples=%s" % ("аудит безопасности" in rt and "статус проекта logistics" in rt))
+
+# ── long reports: a document, not a truncated message ──────────────────────────
+# The bus used to cut agent output at 1200 characters and print a server path the owner
+# cannot open from a phone. A long report must arrive as a file, complete.
+_b, _boundary = B._multipart({"chat_id": "1", "caption": "c"}, "report.txt", b"line1\nline2\n")
+print("multipart-crlf=%s" % (
+    b"\r\n\r\n" in _b and _b.startswith(b"--") and _b.rstrip().endswith(b"--")))
+print("multipart-filename=%s" % (b'filename="report.txt"' in _b))
+
+_calls = {}
+B.tg_send = lambda reply, **kw: (_calls.__setitem__("message", reply), (True, "sent"))[1]
+B.tg_send_document = lambda path, caption="": (
+    _calls.__setitem__("document", (path, caption)), (True, "sent"))[1]
+B.tg_reply_any("короткий ответ")
+_short_as_message = "message" in _calls and "document" not in _calls
+_calls.clear()
+B.tg_reply_any("длинный ответ\n" * 400)
+print("short-reply-is-message=%s" % _short_as_message)
+print("long-reply-is-document=%s" % ("document" in _calls and "message" not in _calls))
+print("long-reply-caption=%s" % (bool(_calls.get("document", ("", ""))[1])))

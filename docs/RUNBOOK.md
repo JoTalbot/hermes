@@ -433,3 +433,69 @@ allowed set. A too-broad sentence («перезапусти сервер») is r
 `tests/agents-selftest.sh` asserts the refusals, not just the successes: disallowed unit,
 missing container, a name carrying `; rm -rf /`, an unknown verb, and the absence of `eval`
 or `bash -c` in the script.
+
+## Staying alive when the box runs out of memory (2026-09-17)
+
+FACT: on 2026-09-17 `octopus-browser-chromium` (another project) held **16.6 of 23.4 GiB**,
+swap was **99 % full** and only ~3.4 GiB was available. The Hermes units had
+`OOMScoreAdjust=0` and `MemoryMax=infinity` — i.e. the kernel was exactly as willing to kill
+`nats-server` as a browser tab. Losing the bus loses the chat, the agents and the mirror at once.
+
+```bash
+# what is in force right now (sizes, priorities, and whether they are applied yet)
+bash /opt/hermes/scripts/install-protection.sh --check     # PROTECTION: OK
+
+# apply / re-apply after adding a unit (idempotent; OOMScoreAdjust needs the next start)
+bash /opt/hermes/scripts/install-protection.sh
+
+# undo everything (drop-ins removed, values return at the next restart of each unit)
+bash /opt/hermes/scripts/install-protection.sh --revert
+```
+
+| unit | OOMScoreAdjust | MemoryHigh | MemoryMax | measured usage |
+|---|---|---|---|---|
+| nats-server | -800 | 384M | 768M | ~30 MiB |
+| hermes-bus-bridge | -800 | 384M | 768M | ~90 MiB |
+| hermes-telegram-inbox | -800 | 256M | 512M | ~60 MiB |
+| hermes-agents | -800 | 1024M | 2048M | ~250 MiB (runs project tests inside) |
+| hermes-gateway | -700 | 768M | 1536M | ~300 MiB |
+| hermes-metrics | -700 | 256M | 512M | ~40 MiB |
+| hermes-shim | -700 | 256M | 512M | ~40 MiB |
+| hermes-serve | -600 | 1024M | 2048M | dashboard, user-facing |
+
+Sizing rule: 4× measured usage. High enough never to interfere, low enough that one runaway
+handler cannot take the box. Observed result after the change: `oom_score` 666 → 134 for the
+bus, agents and inbox; 202 for the gateway. `hermes_proc_oom_score{unit=…}` is exported so
+`HermesUnprotectedFromOOM` fires if this ever regresses.
+
+Other projects' containers are **not** touched: the alert names the offender and the exact
+command (`docker update --memory 8g --memory-swap 8g <container>`) is printed, and the owner
+decides.
+
+## Alerts that actually reach the owner (2026-09-17)
+
+OBSERVATION: 10 rules existed and 5 were firing for hours, but nothing reached a human —
+Alertmanager was never installed and no webhook was configured. An alert nobody sees is a
+config file, not monitoring.
+
+DECISION: no Alertmanager. `scripts/hermes-alert-poller.py` polls the Prometheus API every
+60 s and writes to the same Telegram chat the bus already uses (same token file — no second
+copy of the secret). Grouped by rule name (one noisy rule = one message, not five),
+deduplicated through `/var/lib/hermes-bus/alert-state.json`, repeated at most every 6 h,
+and every resolution is reported.
+
+```bash
+bash /opt/hermes/scripts/install-alerting.sh          # install/refresh the unit
+bash /opt/hermes/scripts/install-alerting.sh --check  # ALERTING: OK (also used by tests)
+bash /opt/hermes/scripts/install-alerting.sh --test   # send a test alert to the chat
+journalctl -u hermes-alert-poller -n 20 -o cat        # what it decided and when
+```
+
+Each message carries an actionable hint, not just a rule name (e.g. a missing project tree
+means «каталог проекта удалён или не клонирован — скажи „клонируй <проект>“»).
+
+Long reports are no longer cut at 1200 characters with a server path the owner cannot open
+from a phone: a reply or forwarded report longer than 3200 characters leaves as a **`.txt`
+document** with a one-line caption (`sendDocument`, multipart written by hand — no extra
+dependency in the bus venv). If the upload fails, the text path is still tried: silence is
+never an option.

@@ -180,11 +180,62 @@ ck "free text is still a task" "free-text-is-task=True" "$CHAT_PROBE"
 ck "the phone keyboard offers six actions" "keyboard-buttons=6" "$CHAT_PROBE"
 ck "an unparsable task is refused in plain language, without a token dump" "refusal-friendly=True" "$CHAT_PROBE"
 ck "the refusal teaches by example" "refusal-has-examples=True" "$CHAT_PROBE"
+ck "a long report leaves as a file, not a truncated message" "long-reply-is-document=True" "$CHAT_PROBE"
+ck "a short answer is still a message" "short-reply-is-message=True" "$CHAT_PROBE"
+ck "the uploaded report is valid multipart (CRLF framing)" "multipart-crlf=True" "$CHAT_PROBE"
 echo "[12] agents: capabilities, answer format and model policy"
 if bash tests/agents-selftest.sh >/tmp/agents-selftest.out 2>&1; then
   ck "agents selftest" "PASS=" "$(grep -o 'PASS=[0-9]* FAIL=[0-9]*' /tmp/agents-selftest.out | tail -1)_$(echo ok)"
 else
   ck "agents selftest" "FAIL=0" "$(grep -o 'PASS=[0-9]* FAIL=[0-9]*' /tmp/agents-selftest.out | tail -1)"
+fi
+echo "[13] resilience: memory protection and alerts that actually reach the owner"
+ck "host pressure is measured (the box OOMs on someone else's browser)" \
+   "def probe_host_pressure" "$(grep -o 'def probe_host_pressure' scripts/hermes_metrics_exporter.py | head -1)"
+ck "an unreadable project is not reported as a missing one" \
+   "def _path_state" "$(grep -o 'def _path_state' scripts/hermes_metrics_exporter.py | head -1)"
+ck "path present is tri-state in HELP (0/1/2)" "0 if absent" \
+   "$(grep -o '0 if absent' scripts/hermes_metrics_exporter.py | head -1)"
+ck "pressure probes are actually wired into the exporter" "probe_host_pressure," \
+   "$(grep -o 'probe_host_pressure,' scripts/hermes_metrics_exporter.py | head -1)"
+ck "memory pressure rules exist" "HermesHostMemoryPressure" \
+   "$(grep -o 'HermesHostMemoryPressure' deploy/monitoring/hermes-agents.rules.yml | head -1)"
+ck "swap rule exists" "HermesHostSwapFull" \
+   "$(grep -o 'HermesHostSwapFull' deploy/monitoring/hermes-agents.rules.yml | head -1)"
+ck "unprotected-Hermes rule exists" "HermesUnprotectedFromOOM" \
+   "$(grep -o 'HermesUnprotectedFromOOM' deploy/monitoring/hermes-agents.rules.yml | head -1)"
+ck "alert rules parse" "ok" "$(python3 -c 'import yaml;yaml.safe_load(open("deploy/monitoring/hermes-agents.rules.yml"));print("ok")' 2>/dev/null)"
+ck "units are pinned above ordinary processes (OOMScoreAdjust)" "OOMScoreAdjust" \
+   "$(grep -o 'OOMScoreAdjust' scripts/install-protection.sh | head -1)"
+ck "memory ceilings are set, not left infinite" "MemoryMax" \
+   "$(grep -o 'MemoryMax=\${max}' scripts/install-protection.sh | head -1)"
+ck "protection installer is revertible" "revert" \
+   "$(grep -o '^  revert)' scripts/install-protection.sh | head -1)"
+ck "alerts are deduplicated between polls" "alert-state.json" \
+   "$(grep -o 'alert-state.json' scripts/hermes-alert-poller.py | head -1)"
+ck "a repeat is rate-limited, not repeated every poll" "REPEAT_AFTER" \
+   "$(grep -o 'REPEAT_AFTER' scripts/hermes-alert-poller.py | head -1)"
+ck "the poller groups noisy alerts instead of sending one message each" "format_group" \
+   "$(grep -o 'def format_group' scripts/hermes-alert-poller.py | head -1)"
+ck "an alert carries an actionable hint, not just a rule name" "HINTS" \
+   "$(grep -o 'HINTS = {' scripts/hermes-alert-poller.py | head -1)"
+ck "poller unit survives a crash (Restart=always)" "Restart=always" \
+   "$(grep -o 'Restart=always' scripts/install-alerting.sh | head -1)"
+# NOTE: `systemctl ... | grep -q` under `set -o pipefail` is always "false" — grep exits on
+# the first match, systemctl dies of SIGPIPE (141) and pipefail reports failure. Hence the
+# captured variable instead of a pipe: v1 of this gate silently skipped the live checks.
+UNIT_FILES="$(systemctl list-unit-files --no-legend --no-pager 2>/dev/null || true)"
+if grep -q 'hermes-alert-poller' <<<"$UNIT_FILES"; then
+  if bash scripts/install-alerting.sh --check >/tmp/alerting-check.out 2>&1; then
+    ck "live: alerting reaches the owner" "ALERTING: OK" "$(grep -o 'ALERTING: OK' /tmp/alerting-check.out | head -1)"
+  else
+    ck "live: alerting reaches the owner" "ALERTING: OK" "$(tail -1 /tmp/alerting-check.out)"
+  fi
+  ck "live: memory protection is in force" "PROTECTION: OK" \
+     "$(bash scripts/install-protection.sh --check 2>&1 | grep -o 'PROTECTION: OK' | head -1)"
+else
+  ((SKIP++)); ((SKIP++))
+  echo "  ~ live alerting/protection checks skipped (юниты не установлены здесь)"
 fi
 echo
 echo "════ $PASS passed · $FAIL failed · $SKIP skipped ════"

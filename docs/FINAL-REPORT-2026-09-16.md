@@ -110,3 +110,30 @@ issues". Every Hermes gate is `[OK]`: bus transport / token / bridge / stream, f
 4. **Backups of the bus itself**: JetStream retention is 7 days and the local mirror is in the nightly archive — consider exporting the stream state weekly for a longer history.
 5. **Alert routing**: the 8 rules exist but nothing notifies a human yet; route critical alerts to the Telegram chat and the `#incidents` channel.
 6. **Turn the 5 missing project checkouts into an explicit decision** (restore, relocate, or remove the agents).
+
+## Incidents 26–27 (2026-09-17, third pass — memory and alerts)
+
+26. **Four live projects looked dead, and one alert lied for a day.** `HermesProjectTreeMissing`
+    was firing for `words`, `octopus`, `words-home-ubuntu-batch19-oci`,
+    `words-home-ubuntu-batch20-oci` — all four directories existed. The exporter runs as user
+    `hermes`, `/home/ubuntu` is `0750 ubuntu:ubuntu`, and `os.path.isdir()` swallows
+    `PermissionError` and returns `False`: **«не вижу» превращалось в «нет»**. Fixed in three
+    places: the probe is now tri-state (`0` absent / `1` present / `2` unreadable), the alert
+    only fires on `0`, and traverse rights were granted (`setfacl -m u:hermes:x /home/ubuntu`,
+    reversible). The fifth alert was TRUE: `liza`'s local copy genuinely does not exist —
+    `rm -rf /home/ubuntu/liza` (DISASTER_RECOVERY.md). A false alarm costs more than no alarm,
+    and only the honest split made the real one visible.
+
+27. **A live test that could never pass: `pipefail` + `grep -q`.** The new gate tested
+    `systemctl list-unit-files | grep -q hermes-alert-poller`, which under `set -o pipefail` is
+    *always* false — `grep` exits on the first match, `systemctl` dies of SIGPIPE (141). The
+    same trap made `install-protection.sh` report installed units as missing. Both now use a
+    captured variable. LESSON: a check that silently skips is worse than a check that fails.
+
+**Third-pass results (measured on the node):** `oom_score` for the bus, agents and inbox
+666 → 134 (kernel now kills anything else first); host pressure exported
+(`hermes_host_mem_used_pct 84.4`, `swap 99.2 %`, `load/core 1.48`); 14 alert rules loaded
+(10 before), **5 firing → 1 true**; alerts now reach the owner's phone (grouped, deduplicated,
+repeated ≤ every 6 h, resolutions reported); long reports leave as `.txt` documents instead of
+being cut at 1200 characters; `tests/run.sh` **112 passed · 0 failed · 0 skipped** (gate [13]
+covers protection, alert delivery, multipart and the tri-state metric).

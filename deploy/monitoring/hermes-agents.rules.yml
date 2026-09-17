@@ -88,3 +88,54 @@ groups:
           summary: "Node {{ $labels.node }} has been silent for 24h"
           description: "A known peer has not sent anything for a day. The node may be down,
             off the tailnet, or simply idle."
+
+      - alert: HermesHostMemoryPressure
+        expr: hermes_host_mem_used_pct > 90
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Host RAM above 90% for 10m ({{ $value }}%)"
+          description: "Another workload on this box is close to starving the agent bus. Check
+            `docker stats` and consider limiting the offending container."
+
+      - alert: HermesHostSwapFull
+        expr: hermes_host_swap_used_pct > 90
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Swap above 90% ({{ $value }}%) — the box is out of real memory"
+          description: "Sustained swap use means every Hermes process is paying for someone
+            else's memory. Performance of the bus and the chat degrades first."
+
+      - alert: HermesHostLoadHigh
+        expr: hermes_host_load_per_core > 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Load per core above 3 ({{ $value }})"
+          description: "Scheduled handlers and model calls will time out. Identify the process
+            before it affects the bus."
+
+      - alert: HermesUnprotectedFromOOM
+        expr: hermes_proc_oom_score{unit="nats-server"} > 200 or hermes_proc_oom_score{unit="hermes-agents"} > 200
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.unit }} has a high OOM score ({{ $value }})"
+          description: "The kernel would kill the agent bus as readily as anything else.
+            Run scripts/install-protection.sh and restart the unit."
+
+      - alert: HermesProjectPathUnreadable
+        expr: hermes_project_path_present == 2
+        for: 1h
+        labels:
+          severity: info
+        annotations:
+          summary: "Project {{ $labels.project }} exists but the metrics user cannot see it"
+          description: "The path is there, the exporter is not allowed to look at it. Either
+            grant traverse rights (setfacl -m u:hermes:x /home/ubuntu) or ignore this alert
+            knowingly — but never mistake it for a missing project."

@@ -55,7 +55,9 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -205,6 +207,75 @@ def tg_send(text: str, channel: str | None = None, force: bool = False,
         return bool(r.get("ok")), "sent" if r.get("ok") else str(r.get("description"))
     except Exception as e:
         return False, f"{type(e).__name__}: {e}"
+
+
+# Telegram's own cap is 4096 characters; texts longer than this are useless on a phone
+# anyway, so a long report is sent as a FILE with a short caption instead of a truncated
+# message ending in a path the owner cannot open from his phone.
+TG_TEXT_LIMIT = 3200
+
+
+def _multipart(fields: dict, filename: str, filedata: bytes) -> tuple[bytes, str]:
+    """Minimal multipart/form-data encoder — no third-party dependency in the bus venv."""
+    boundary = "----hermes" + uuid.uuid4().hex
+    parts: list[bytes] = []
+    for name, value in fields.items():
+        parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n"
+                     f"{value}\r\n".encode())
+    parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"document\"; "
+                 f"filename=\"{filename}\"\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n"
+                 .encode() + filedata + b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode())
+    return b"".join(parts), boundary
+
+
+def tg_send_document(path: str, caption: str = "") -> tuple[bool, str]:
+    """Send a file to the owner's chat. Used when a report does not fit in a message."""
+    token = tg_token()
+    chat = tg_chat()
+    if not token or not chat:
+        return False, "no token or no chat"
+    p = Path(path)
+    if not p.is_file():
+        return False, f"file not found: {path}"
+    try:
+        data = p.read_bytes()
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+    if len(data) > 45 * 1024 * 1024:          # Telegram's bot limit
+        return False, f"file too large ({len(data) // 1048576} MiB)"
+    body, boundary = _multipart(
+        {"chat_id": str(chat["chat_id"]), "caption": caption[:1000],
+         "parse_mode": "HTML", "disable_notification": "true"},
+        p.name, data)
+    url = f"https://api.telegram.org/bot{token}/sendDocument"
+    req = urllib.request.Request(url, data=body, headers={
+        "Content-Type": f"multipart/form-data; boundary={boundary}"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            ok = bool(json.loads(r.read()).get("ok"))
+        if ok:
+            log(f"telegram: sent document {p.name} ({len(data) // 1024} KiB)")
+        return ok, "sent" if ok else "rejected"
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
+def tg_reply_any(reply: str, keyboard: bool = False) -> tuple[bool, str]:
+    """A reply is a message if it fits; a document if it does not."""
+    if len(reply) <= TG_TEXT_LIMIT:
+        return tg_send(reply, force=True, keyboard=keyboard)
+    plain = re.sub(r"<[^>]+>", "", reply)
+    tmp = STATE_DIR / f"reply-{int(time.time())}.txt"
+    try:
+        tmp.write_text(plain)
+    except Exception as e:
+        return False, f"cannot stage long reply: {e}"
+    head = plain.strip().splitlines()[0][:120] if plain.strip() else "Отчёт"
+    ok, detail = tg_send_document(str(tmp), caption=f"📄 {head}\n(полный текст файлом)")
+    if not ok:                      # fall back to a trimmed message, never silence
+        ok, detail = tg_send(reply[:TG_TEXT_LIMIT], force=True, keyboard=keyboard)
+    return ok, detail
 
 
 def tg_discover(as_json: bool = False) -> int:
@@ -597,7 +668,7 @@ def tg_poll_once(token: str, timeout: int = 25) -> int:
         except Exception:
             pass
         reply = handle_owner_text(text)
-        ok, detail = tg_send(reply, force=True, keyboard=want_keyboard)
+        ok, detail = tg_reply_any(reply, keyboard=want_keyboard)
         handled += 1
         if not ok:
             log(f"telegram reply failed: {detail}")
@@ -697,7 +768,20 @@ async def run_daemon(rpc_echo: bool = False) -> None:
                 if mirrored:
                     await _ack(msg)
                 if should_forward(env) and tg_chat():
-                    ok, detail = tg_send(tg_line(env), channel=env.get("channel"))
+                    body = (env.get("text") or "")
+                    ref = next((r for r in (env.get("refs") or []) if Path(str(r)).is_file()),
+                               "")
+                    if len(body) > TG_TEXT_LIMIT and ref:
+                        # The message would be cut in the middle; the file carries the whole
+                        # report and the caption still says what happened.
+                        head = tg_line(env).split("\n")[0]
+                        ok, detail = tg_send_document(
+                            ref, caption=f"{head}\n{esc(body[:600])}…")
+                        if not ok:
+                            log(f"telegram document failed ({detail}); sending text")
+                            ok, detail = tg_send(tg_line(env), channel=env.get("channel"))
+                    else:
+                        ok, detail = tg_send(tg_line(env), channel=env.get("channel"))
                     if not ok:
                         log(f"telegram: {detail}")
                 log(f"← {env.get('kind')} #{env.get('channel') or 'dm'} "

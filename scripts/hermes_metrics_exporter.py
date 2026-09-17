@@ -65,6 +65,73 @@ def _systemctl_active(unit: str) -> int:
 
 
 # --------------------------------------------------------------------- probes
+def probe_host_pressure() -> list[str]:
+    """Host memory/swap/load — the metrics that decide whether Hermes survives.
+
+    There is no node_exporter on this box, and the pressure that matters (another project's
+    browser automation holding 16 of 23 GiB) is exactly what can OOM-kill nats and the
+    agents. Measured here from /proc so alert rules can fire on it.
+    """
+    out = [
+        "# HELP hermes_host_mem_used_pct Host RAM used, percent",
+        "# TYPE hermes_host_mem_used_pct gauge",
+        "# HELP hermes_host_mem_avail_bytes Host RAM available, bytes",
+        "# TYPE hermes_host_mem_avail_bytes gauge",
+        "# HELP hermes_host_swap_used_pct Host swap used, percent",
+        "# TYPE hermes_host_swap_used_pct gauge",
+        "# HELP hermes_host_load_per_core 1-minute load average divided by CPU count",
+        "# TYPE hermes_host_load_per_core gauge",
+        "# HELP hermes_proc_oom_score Current OOM score of a Hermes process (lower = safer)",
+        "# TYPE hermes_proc_oom_score gauge",
+    ]
+    info = {}
+    try:
+        for line in open("/proc/meminfo"):
+            k, v = line.split(":", 1)
+            info[k.strip()] = float(v.strip().split()[0]) * 1024        # kB -> bytes
+    except Exception:
+        pass
+    total = info.get("MemTotal") or 0
+    avail = info.get("MemAvailable") or 0
+    used = max(0.0, total - avail)
+    swap_total = info.get("SwapTotal") or 0
+    swap_free = info.get("SwapFree") or 0
+    out.append(f"hermes_host_mem_used_pct {100 * used / total:.1f}" if total else
+               "hermes_host_mem_used_pct 0")
+    out.append(f"hermes_host_mem_avail_bytes {int(avail)}")
+    out.append(f"hermes_host_swap_used_pct "
+               f"{100 * (swap_total - swap_free) / swap_total:.1f}" if swap_total else
+               "hermes_host_swap_used_pct 0")
+    try:
+        load1 = float(open("/proc/loadavg").read().split()[0])
+        cores = os.cpu_count() or 1
+        out.append(f"hermes_host_load_per_core {load1 / cores:.2f}")
+    except Exception:
+        out.append("hermes_host_load_per_core 0")
+
+    # Are the Hermes processes actually protected from the OOM killer? A score of 0 means
+    # "kill me as readily as anything else", which is what this probe was added to catch.
+    for unit, score in _oom_scores(("nats-server", "hermes-agents", "hermes-bus-bridge",
+                                    "hermes-gateway")):
+        out.append(f'hermes_proc_oom_score{{unit="{unit}"}} {score}')
+    return out
+
+
+def _oom_scores(units: tuple[str, ...]) -> list[tuple[str, int]]:
+    rows = []
+    for unit in units:
+        score = -1
+        try:
+            pid = subprocess.run(["systemctl", "show", "-p", "MainPID", "--value", unit],
+                                 capture_output=True, text=True, timeout=5).stdout.strip()
+            if pid and pid != "0":
+                score = int(open(f"/proc/{pid}/oom_score").read().strip())
+        except Exception:
+            score = -1
+        rows.append((unit, score))
+    return rows
+
+
 def probe_units() -> list[str]:
     out = [
         "# HELP hermes_unit_active 1 if the systemd unit is active",
@@ -372,13 +439,34 @@ def probe_bus_agents() -> list[str]:
     return out
 
 
+def _path_state(path: str) -> int:
+    """0 = нет на диске, 1 = есть, 2 = есть, но не видно этому пользователю.
+
+    OBSERVATION 2026-09-17: экспортёр работает под юзером hermes, а /home/ubuntu — 0750
+    ubuntu:ubuntu, поэтому четыре ЖИВЫХ проекта (words, octopus, batch19, batch20)
+    показывались как отсутствующие и сутки горел HermesProjectTreeMissing. os.path.isdir()
+    глотает PermissionError и возвращает False, то есть «не вижу» превращалось в «нет» —
+    ложный алерт хуже отсутствия алерта.
+    """
+    import stat as _stat
+    try:
+        return 1 if _stat.S_ISDIR(os.stat(path).st_mode) else 0
+    except FileNotFoundError:
+        return 0
+    except PermissionError:
+        return 2
+    except OSError:
+        return 2
+
+
 def probe_projects() -> list[str]:
     """Project agents: how many projects are represented, and is their tree still there?
     A project agent whose local_path vanished is a silent, permanent lie in the registry."""
     out = [
         "# HELP hermes_projects_wired Project agents defined",
         "# TYPE hermes_projects_wired gauge",
-        "# HELP hermes_project_path_present 1 if the project's local_path exists",
+        "# HELP hermes_project_path_present 1 if the project's local_path exists, 0 if absent,"
+        " 2 if it exists but this user cannot see it (permissions)",
         "# TYPE hermes_project_path_present gauge",
         "# HELP hermes_project_dirty Uncommitted paths in the project repo",
         "# TYPE hermes_project_dirty gauge",
@@ -398,9 +486,9 @@ def probe_projects() -> list[str]:
                 continue
             n += 1
             slug = re.sub(r"[^A-Za-z0-9_-]", "_", os.path.basename(f)[:-5])
-            out.append(f'hermes_project_path_present{{project="{slug}"}} '
-                       f'{1 if os.path.isdir(path) else 0}')
-            if os.path.isdir(os.path.join(path, ".git")):
+            state = _path_state(path)
+            out.append(f'hermes_project_path_present{{project="{slug}"}} {state}')
+            if state == 1 and os.path.isdir(os.path.join(path, ".git")):
                 try:
                     r = subprocess.run(["git", "-C", path, "status", "--porcelain"],
                                        capture_output=True, text=True, timeout=10)
@@ -414,7 +502,7 @@ def probe_projects() -> list[str]:
     return out
 
 
-PROBES = (probe_units, probe_shim, probe_balancer, probe_agents, probe_bus,
+PROBES = (probe_units, probe_host_pressure, probe_shim, probe_balancer, probe_agents, probe_bus,
           probe_github, probe_tailscale, probe_agent_bus, probe_bus_agents,
           probe_projects)
 
