@@ -131,6 +131,30 @@ host agent, not by the `hermes-os` project agent, which is what the old alias di
 were sent to the owner in Telegram (message_id=210) so the last live check — a real tap — can be
 made by hand.
 
+## LLM check of the agents (same day): which model really answers
+
+The owner asked for a check of the agents' LLM path. Result: the path works, the routing does not.
+
+* **Works:** `hermes-shim` on 127.0.0.1:9700 answers (200 on `/v1/models`), the Octopus AIOS
+  balancer is healthy with 11 providers and all of them `healthy`, agents name a TIER and hold no
+  provider keys (`/etc/hermes/shim.env` 0600 root, the shim key in `/home/hermes/.hermes/config.yaml`
+  600), live answers arrive in 0.3–1.7 s with no fallbacks in 24 h (2 model calls, 0 fallbacks,
+  p95 1.7 s), and the deterministic handlers keep working without a model at all.
+* **Does not work:** the AIOS bridge ignores the `tier` field — `{"tier":"reasoning"}` was answered
+  by `tier=fast, provider=groq-gpt-oss-20b`; and the balancer's cache key has no tier in it, so the
+  same prompt with `{"tier":"local"}` returned the cached cloud answer instead of a local model.
+  The owner's rule "models by function, no loss of smartness" was therefore satisfied by accident:
+  our escalation keywords coincide with the balancer's own classifier keywords, `hermes-local` is
+  never honoured, and a cross-tier cache hit can serve the cheap model to a "smart" request.
+* **Fixed:** the shim now reports and counts the tier/provider that actually answered, agents record
+  it in `history.jsonl`, the exporter publishes `hermes_model_served_1h` and
+  `hermes_model_tier_mismatch_1h`, the answer footer shows
+  `модель hermes-reason · groq-gpt-oss-20b [fast] ⚠️ ответил не тот тир`, and gate [18] checks it
+  statically and live. Measured after the fix on the live path: history record
+  `tier=hermes-reason · served_tier=code · provider=groq-gpt-oss-20b · tier_mismatch=True`.
+* **Open:** the real fix is a 2-line additive change in the AIOS bridge (another project) — waiting
+  for the owner's decision.
+
 **Lesson from the batch:** after deploying agent code the unit must be restarted (Python caches
 imports at start); a fixed `routing.py` keeps answering by the old rules otherwise. `hermes-agents`
 had been running since 06:01:27 while the fixed routing landed at 06:17:30.

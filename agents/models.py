@@ -48,6 +48,10 @@ SHIM_ENV = Path(os.environ.get("HERMES_SHIM_ENV", "/etc/hermes/shim.env"))
 TIER_ALIASES = {"hermes-fast", "hermes-reason", "hermes-code", "hermes-long", "hermes-local",
                 "hermes-auto"}
 
+# Как тот же тир называется на стороне балансировщика — для сверки «просили / ответили».
+TIER_SERVED_NAME = {"hermes-fast": "fast", "hermes-reason": "reasoning", "hermes-code": "code",
+                    "hermes-long": "long_context", "hermes-local": "local"}
+
 # Built-in defaults: the policy file may override any of them, but the system behaves
 # sensibly if the file is missing (e.g. inside a recovery container).
 DEFAULT_POLICY = {
@@ -192,9 +196,24 @@ def ask(question: str, facts: str, agent_id: str, purpose: str = "", node: str =
         with urllib.request.urlopen(req, timeout=timeout) as r:
             data = json.loads(r.read())
         text = (data["choices"][0]["message"]["content"] or "").strip()
+        # FACT (2026-09-17): балансировщик может ответить не тем тиром, который просили
+        # (мост игнорирует поле tier, а его кэш не различает тиры). Раньше мы записывали
+        # в телеметрию запрошенный тир — то есть отчёт «ответила hermes-reason» был
+        # утверждением о намерении, а не о факте. Теперь берём факт из ответа shim.
+        served = data.get("aios") if isinstance(data.get("aios"), dict) else {
+            "tier": data.get("aios_tier") or "",
+            "provider": data.get("aios_provider") or "",
+            "cached": bool(data.get("aios_cached")),
+        }
         meta.update(ok=bool(text), model=data.get("model") or model,
                     latency_ms=int((time.time() - started) * 1000),
-                    usage=data.get("usage") or {})
+                    usage=data.get("usage") or {},
+                    served_tier=str(served.get("tier") or ""),
+                    provider=str(served.get("provider") or ""),
+                    cached=bool(served.get("cached")))
+        want = TIER_SERVED_NAME.get(model)
+        if want and meta["served_tier"] and want != meta["served_tier"]:
+            meta["tier_mismatch"] = True
         if text:
             return text, meta
         meta["fallback"] = "пустой ответ"

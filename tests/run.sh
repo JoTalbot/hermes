@@ -551,6 +551,51 @@ else
 fi
 
 
+echo "[18] the answer says which model really served it"
+cd "$REPO_ROOT"
+
+ck "the shim reports the served tier and provider" "aios_tier" \
+   "$(grep -o 'aios_tier' deploy/shim/aios_openai_shim.py | head -1)"
+ck "the shim counts tier mismatches" "tier_mismatch_total" \
+   "$(grep -o 'tier_mismatch_total' deploy/shim/aios_openai_shim.py | head -1)"
+ck "the shim says it in the log, not only in a metric" "tier mismatch: asked" \
+   "$(grep -o 'tier mismatch: asked' deploy/shim/aios_openai_shim.py | head -1)"
+ck "agents read the served tier, not the requested one" "served_tier" \
+   "$(grep -o 'served_tier' agents/models.py | head -1)"
+ck "a mismatch is called a mismatch" "tier_mismatch" \
+   "$(grep -o 'tier_mismatch' agents/models.py | head -1)"
+ck "the run history keeps the provider that answered" '"provider": meta.get' \
+   "$(grep -o '"provider": meta.get' agents/runtime.py | head -1)"
+ck "the exporter exposes served tiers" "hermes_model_served_1h" \
+   "$(grep -o 'hermes_model_served_1h' scripts/hermes_metrics_exporter.py | head -1)"
+ck "the exporter exposes tier mismatches" "hermes_model_tier_mismatch_1h" \
+   "$(grep -o 'hermes_model_tier_mismatch_1h' scripts/hermes_metrics_exporter.py | head -1)"
+
+if [[ -x .venv-bus/bin/python ]]; then
+  ANS="$(./.venv-bus/bin/python - <<'PY' 2>/dev/null
+import sys
+sys.path.insert(0, "agents")
+import models
+text, meta = models.ask("Ответь одним словом: сколько будет два плюс два?",
+                        "факты: калькулятор недоступен", "server-guardian",
+                        purpose="проверка телеметрии модели", model="hermes-fast", timeout=40)
+tiers = ("fast", "reasoning", "code", "long_context", "local")
+marks = []
+if meta.get("provider"):
+    marks.append("телеком-провайдер-ок")
+if meta.get("served_tier") in tiers:
+    marks.append("телеком-тир-ок")
+print(" ".join(marks) + " | провайдер=%s тир=%s ответ=%s" % (
+    meta.get("provider"), meta.get("served_tier"), meta.get("ok")))
+PY
+)"
+  ck "live: the answer names the provider that served it" "телеком-провайдер-ок" "$ANS"
+  ck "live: the served tier is a real balancer tier" "телеком-тир-ок" "$ANS"
+else
+  ((SKIP++)); ((SKIP++)); echo "  ~ live model telemetry checks skipped (нет venv шины)"
+fi
+
+
 echo
 echo "════ $PASS passed · $FAIL failed · $SKIP skipped ════"
 [[ $FAIL -eq 0 ]]

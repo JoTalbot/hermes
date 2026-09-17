@@ -739,6 +739,49 @@ for the owner, it deletes nothing.
    the live gate could not see the empty state. Both fixed; the live ratings check now runs on a
    fixture and on the node's file.
 
+## Which model actually answered (2026-09-17)
+
+The owner asked to check the LLM path of the agents. The path works — the shim is up, the
+balancer is healthy (11 providers), agents ask by TIER and hold no provider keys, answers come
+back in 0.3–1.7 s and no request fell back. But the check found that **the requested tier was not
+what answered**, and the system could not see it:
+
+* the AIOS bridge accepts a `tier` field in the body of `/api/v1/aios/ask`, but the handler never
+  passes it to `llm_balancer.ask()`, so the tier is chosen by the balancer's own keyword classifier
+  over the prompt text. Measured: a request with `"tier": "reasoning"` came back as
+  `tier=fast, provider=groq-gpt-oss-20b` (the cheap 20B model);
+* the balancer's answer cache key is `task_type::cloud_only::json_mode::system::prompt` — no tier
+  in it. Measured: the same prompt asked with `"tier": "local"` returned the cached cloud answer
+  (`provider=groq-gpt-oss-20b (cached)`), so an "escalate to a smarter model" step can be served
+  by the cheap one within the 5-minute TTL;
+* our own telemetry recorded the tier we ASKED for as the model that answered, so reports said
+  `hermes-reason` while a fast model had served the request.
+
+```bash
+# what the balancer does with a tier (never cached: unique prompt)
+curl -s -X POST localhost:9600/api/v1/aios/ask -H 'Content-Type: application/json' \
+  -d '{"goal":"проба '"$(date +%s%N)"': назови столицу Франции","tier":"reasoning"}' | python3 -m json.tool
+# what our agents were told, and how often the tiers disagree
+curl -s localhost:9700/metrics | grep -E 'llm_tier_mismatch_total|llm_served_tier_total'
+curl -s localhost:9725/metrics | grep -E 'hermes_model_served_1h|hermes_model_tier_mismatch_1h'
+```
+
+**Fixed on our side (this is what the metrics above are for):** the shim now returns, and counts,
+the tier and provider that actually answered (`aios.tier`, `aios.provider`, `aios.cached`,
+`llm_tier_mismatch_total`, `llm_served_tier_total{tier=...}`, plus a rate-limited log line
+`tier mismatch: asked X, balancer served Y`); `models.ask` records `served_tier` / `provider` /
+`cached` / `tier_mismatch`; the run history keeps them; the exporter exposes
+`hermes_model_served_1h` and `hermes_model_tier_mismatch_1h`; and the answer footer shows
+`модель hermes-reason · groq-gpt-oss-20b [fast] ⚠️ ответил не тот тир`. A green metric no longer
+means "we asked the smart model" — it means "the smart model answered".
+
+**Still open (needs the owner's decision).** Making the tier real is a 2-line, additive change in
+the AIOS bridge (`tier: Optional[str]` in `GoalRequest` + `task_type=req.tier or "auto"` in the
+handler). It is another project's service, so it is not touched without consent; until then the
+escalation keeps working only because our own escalation keywords («почему», «проанализируй»,
+diffs, long documents) happen to be the same words the balancer's classifier looks for, and
+`hermes-local` is never honoured.
+
 **After deploying agent code, restart the unit.** Python caches imports at start, so a fixed
 `agents/routing.py` keeps answering by the old rules until `hermes-agents` is restarted (same for
 `bus/bus_bridge.py` and `hermes-bus-bridge`). Measured during this batch: `routing.py` was deployed

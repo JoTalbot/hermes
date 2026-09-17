@@ -635,7 +635,16 @@ class Runtime:
         model, why = models.model_for(agent.id, task, analysis=analysis)
         text, meta = await asyncio.to_thread(
             models.ask, task, fact_text, agent.id, agent.description, str(server_id()), model)
-        meta_line = (f"модель {meta.get('model')} ({why}) · "
+        # Показываем не только «просили», но и кто ответил: расхождение тира — это
+        # потеря умности, о которой владелец должен узнать из ответа, а не из метрики.
+        served_note = ""
+        if meta.get("provider"):
+            served_note = f" · {meta['provider']}"
+        if meta.get("served_tier"):
+            served_note += f" [{meta['served_tier']}]"
+        if meta.get("tier_mismatch"):
+            served_note += " ⚠️ ответил не тот тир"
+        meta_line = (f"модель {meta.get('model')}{served_note} ({why}) · "
                      f"{meta.get('latency_ms', 0)} мс")
         # Телеметрия модели: какой тир был выбран, ответил ли он и не пришлось ли падать
         # на локальную модель. Раньше это было невидимо: балансер мог деградировать, а
@@ -651,6 +660,10 @@ class Runtime:
             "queue_ms": waited_ms,
             "tier": model,
             "model": meta.get("model") or "",
+            "served_tier": meta.get("served_tier") or "",
+            "provider": meta.get("provider") or "",
+            "cached": bool(meta.get("cached")),
+            "tier_mismatch": bool(meta.get("tier_mismatch")),
             "fallback": meta.get("fallback") or (f"escalated from {meta['escalated_from']}"
                                                  if meta.get("escalated_from") else ""),
             "usage": meta.get("usage") or {},

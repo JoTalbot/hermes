@@ -596,9 +596,14 @@ def probe_model_telemetry() -> list[str]:
         "# TYPE hermes_model_latency_p95_ms gauge",
         "# HELP hermes_queue_wait_p95_ms 95th percentile queue wait before a handler started",
         "# TYPE hermes_queue_wait_p95_ms gauge",
+        "# HELP hermes_model_served_1h Actually served tier/provider in the last hour",
+        "# TYPE hermes_model_served_1h gauge",
+        "# HELP hermes_model_tier_mismatch_1h Answers served by a different tier than requested",
+        "# TYPE hermes_model_tier_mismatch_1h gauge",
     ]
     now = time.time()
     tiers: dict[str, dict] = {}
+    served_counts: dict[tuple[str, str], int] = {}
     queue: list[int] = []
     try:
         with open(path, encoding="utf-8") as fh:
@@ -622,6 +627,13 @@ def probe_model_telemetry() -> list[str]:
                     t["n"] += 1
                     if r.get("fallback"):
                         t["fb"] += 1
+                    served = str(r.get("served_tier") or "")
+                    if served:
+                        key = (served, str(r.get("provider") or "?"))
+                        served_counts[key] = served_counts.get(key, 0) + 1
+                    if r.get("tier_mismatch"):
+                        served_counts[("mismatch", tier)] = \
+                            served_counts.get(("mismatch", tier), 0) + 1
     except OSError:
         return out
     for tier, t in sorted(tiers.items()):
@@ -631,6 +643,12 @@ def probe_model_telemetry() -> list[str]:
         out.append(f"hermes_model_requests_1h{lbl} {t['n']}")
         out.append(f"hermes_model_fallbacks_1h{lbl} {t['fb']}")
         out.append(f"hermes_model_latency_p95_ms{lbl} {p95}")
+    for (served, provider), n in sorted(served_counts.items()):
+        if served == "mismatch":
+            out.append(f'hermes_model_tier_mismatch_1h{{tier="{provider}"}} {n}')
+        else:
+            out.append('hermes_model_served_1h{tier="%s",provider="%s"} %d'
+                       % (served.replace('"', ""), provider.replace('"', ""), n))
     if queue:
         q = sorted(queue)
         out.append("hermes_queue_wait_p95_ms "

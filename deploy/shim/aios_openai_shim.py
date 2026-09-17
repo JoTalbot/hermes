@@ -123,7 +123,13 @@ STATS = {
     "goal_budget_exhausted_total": 0,
     "upstream_fallback_total": 0,
     "upstream_short_circuit_total": 0,
+    # Сколько раз просили один тир, а ответил другой — это и есть «потеря умности».
+    "tier_mismatch_total": 0,
 }
+
+# Что реально ответило (тир балансировщика) за время жизни процесса.
+SERVED_TIERS: dict[str, int] = {}
+_TIER_MISMATCH_LAST_LOG = [0.0]
 
 
 def _post_json(path: str, payload: dict) -> tuple[int, dict]:
@@ -533,6 +539,31 @@ def _is_fallback(data: dict, text: str) -> bool:
     return any(marker in head for marker in FALLBACK_MARKERS)
 
 
+def _served_info(data: dict) -> dict:
+    """Кто действительно ответил: тир и провайдер балансировщика.
+
+    FACT (2026-09-17): AIOS-мост принимает поле tier в теле запроса, но обработчик
+    /api/v1/aios/ask не передаёт его в llm_balancer.ask — тир выбирает классификатор по
+    тексту промпта. Без этой функции агент считал отвечавшую модель той, которую просил.
+    """
+    d = data or {}
+    return {"tier": str(d.get("tier") or ""), "provider": str(d.get("provider") or ""),
+            "cached": bool(d.get("cached"))}
+
+
+def note_served(tier_asked: str | None, served: dict) -> None:
+    """Учесть факт ответа и сказать громко, если ответил не тот тир, что просили."""
+    st = served.get("tier") or "?"
+    SERVED_TIERS[st] = SERVED_TIERS.get(st, 0) + 1
+    if tier_asked and served.get("tier") and tier_asked != served["tier"]:
+        STATS["tier_mismatch_total"] += 1
+        now = time.time()
+        if now - _TIER_MISMATCH_LAST_LOG[0] > 60:          # не спамить журнал
+            _TIER_MISMATCH_LAST_LOG[0] = now
+            print(f"tier mismatch: asked {tier_asked}, balancer served {st} "
+                  f"via {served.get('provider') or '?'}", file=sys.stderr, flush=True)
+
+
 def _ask_balancer(payload: dict, attempts: int = 1) -> tuple[int, dict, str]:
     """POST /ask, reporting the emergency fallback as a failure rather than an answer.
 
@@ -559,7 +590,7 @@ def _ask_balancer(payload: dict, attempts: int = 1) -> tuple[int, dict, str]:
 
 # ---------------------------------------------------------- SSE re-emitter
 def _sse_chunks_for_content(cid: str, model: str, created: int, text: str,
-                            usage: dict | None = None):
+                            usage: dict | None = None, served: dict | None = None):
     """Well-formed OpenAI chat.completion.chunk SSE stream for plain content."""
     def frame(delta: dict, finish=None) -> bytes:
         obj = {
@@ -578,12 +609,14 @@ def _sse_chunks_for_content(cid: str, model: str, created: int, text: str,
     final = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
     if usage:
         final["usage"] = usage
+    if served:                       # кто ответил на самом деле, а не кого просили
+        final["aios"] = served
     yield f"data: {json.dumps({'id': cid, 'object': 'chat.completion.chunk', 'created': created, 'model': model, **final}, ensure_ascii=False)}\n\n".encode()
     yield b"data: [DONE]\n\n"
 
 
 def _sse_chunks_for_tool_calls(cid: str, model: str, created: int, calls: list[dict],
-                               usage: dict | None = None):
+                               usage: dict | None = None, served: dict | None = None):
     """SSE stream carrying tool_calls, as the OpenAI SDK expects them."""
     def frame(delta: dict, finish=None) -> bytes:
         obj = {
@@ -603,6 +636,8 @@ def _sse_chunks_for_tool_calls(cid: str, model: str, created: int, calls: list[d
     final = {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}
     if usage:
         final["usage"] = usage
+    if served:                       # кто ответил на самом деле, а не кого просили
+        final["aios"] = served
     yield f"data: {json.dumps({'id': cid, 'object': 'chat.completion.chunk', 'created': created, 'model': model, **final}, ensure_ascii=False)}\n\n".encode()
     yield b"data: [DONE]\n\n"
 
@@ -704,6 +739,7 @@ class Handler(BaseHTTPRequestHandler):
                 "auth_required": not (ALLOW_ANON or not API_KEY),
                 "features": {"streaming": True, "tool_bridge": True},
                 "metrics": {**STATS, "avg_latency_ms": round(STATS["latency_sum_ms"] / n, 1)},
+                "served_tiers": SERVED_TIERS,
             })
         if self.path == "/metrics":
             # Prometheus text format for the observability requirement
@@ -724,7 +760,10 @@ class Handler(BaseHTTPRequestHandler):
                 f"llm_goal_budget_exhausted_total {STATS['goal_budget_exhausted_total']}",
                 f"llm_upstream_fallback_total {STATS['upstream_fallback_total']}",
                 f"llm_upstream_short_circuit_total {STATS['upstream_short_circuit_total']}",
+                f"llm_tier_mismatch_total {STATS['tier_mismatch_total']}",
             ]
+            lines += [f'llm_served_tier_total{{tier="{t}"}} {n}'
+                      for t, n in sorted(SERVED_TIERS.items())]
             raw = ("\n".join(lines) + "\n").encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; version=0.0.4")
@@ -816,6 +855,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_sse_error(err)
             return self._send(502, err)
 
+        served = _served_info(data)
+        note_served(tier, served)
         text = flatten_upstream(data)
         calls: list[dict] = []
         if tool_block:
@@ -833,6 +874,8 @@ class Handler(BaseHTTPRequestHandler):
                     calls2, content2 = _parse_model_reply(text2, allowed_names)
                     if calls2 or (content2 or "").strip():
                         calls, content, text = calls2, content2, text2
+                        served = _served_info(data2)   # ответила, возможно, другая модель
+                        note_served(tier, served)
                 if not calls and not (content or "").strip():
                     STATS["tool_parse_fallbacks_total"] += 1
                     # Never return an empty assistant turn: the agent would
@@ -855,8 +898,10 @@ class Handler(BaseHTTPRequestHandler):
         if stream:
             STATS["streaming_requests_total"] += 1
             if calls:
-                return self._send_sse(_sse_chunks_for_tool_calls(cid, model, created, calls, usage))
-            return self._send_sse(_sse_chunks_for_content(cid, model, created, content or "", usage))
+                return self._send_sse(_sse_chunks_for_tool_calls(cid, model, created, calls,
+                                                                 usage, served))
+            return self._send_sse(_sse_chunks_for_content(cid, model, created, content or "",
+                                                           usage, served))
 
         # Non-streaming OpenAI response shape.
         if calls:
@@ -872,6 +917,11 @@ class Handler(BaseHTTPRequestHandler):
             "model": model,
             "choices": [{"index": 0, "message": msg, "finish_reason": finish}],
             "usage": usage,
+            # Кто ответил на самом деле (клиенты OpenAI лишние поля игнорируют).
+            "aios": served,
+            "aios_tier": served["tier"],
+            "aios_provider": served["provider"],
+            "aios_cached": served["cached"],
         })
 
 
