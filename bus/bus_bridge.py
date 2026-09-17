@@ -261,6 +261,16 @@ def tg_send_document(path: str, caption: str = "") -> tuple[bool, str]:
         return False, f"{type(e).__name__}: {e}"
 
 
+def _stage_report(text: str) -> str:
+    """Положить длинный отчёт в файл, чтобы отправить его документом."""
+    tmp = STATE_DIR / f"report-{int(time.time())}.txt"
+    try:
+        tmp.write_text(text)
+    except Exception as e:
+        log(f"cannot stage report: {type(e).__name__}: {e}")
+    return str(tmp)
+
+
 def tg_reply_any(reply: str, keyboard: bool = False) -> tuple[bool, str]:
     """A reply is a message if it fits; a document if it does not."""
     if len(reply) <= TG_TEXT_LIMIT:
@@ -273,7 +283,12 @@ def tg_reply_any(reply: str, keyboard: bool = False) -> tuple[bool, str]:
         return False, f"cannot stage long reply: {e}"
     head = plain.strip().splitlines()[0][:120] if plain.strip() else "Отчёт"
     ok, detail = tg_send_document(str(tmp), caption=f"📄 {head}\n(полный текст файлом)")
-    if not ok:                      # fall back to a trimmed message, never silence
+    if ok:
+        try:
+            tmp.unlink()            # отправленный отчёт не должен мусорить в state-каталоге
+        except Exception:
+            pass
+    else:                           # fall back to a trimmed message, never silence
         ok, detail = tg_send(reply[:TG_TEXT_LIMIT], force=True, keyboard=keyboard)
     return ok, detail
 
@@ -352,6 +367,9 @@ def seen_save(seen: set[str]) -> None:
     p.write_text(json.dumps(sorted(seen)[-8000:]))
 
 
+SELFTEST_TAG = re.compile(r"\bselftest-\d{4,8}\b")
+
+
 def should_forward(env: dict) -> bool:
     """Forward to Telegram only messages *this* node authored.
 
@@ -368,9 +386,12 @@ def should_forward(env: dict) -> bool:
             and env.get("node") == server_id()
             and (env.get("channel") or env.get("kind") == "error")
             # The bus selftest publishes to real channels (that is how it proves mirroring
-            # and priorities). Its messages are tagged "selftest" and are the only thing
-            # filtered here: tests must exercise the real path without pinging the owner.
-            and "selftest" not in text
+            # and priorities), so its messages must not reach the owner's phone. They are
+            # identified by the tag they carry ("selftest-HHMMSS", sometimes not the first
+            # word) and NOT by the bare English word: a real report whose test output
+            # contained the line "ok agents selftest" was silently swallowed, and the owner
+            # never saw the result of the task he had just asked for.
+            and not SELFTEST_TAG.search(text)
             # The owner's own task is already acknowledged ("Задача принята"); echoing it
             # back from the bus is the same sentence twice.
             and not (env.get("kind") == "task"
@@ -527,6 +548,12 @@ HELP = """🤖 <b>Hermes на связи</b>
    <i>сделать бэкап</i>
    <i>аудит безопасности</i>
    <i>какие агенты</i>
+
+Ещё можно запускать проверки проектов:
+   <i>прогони тесты в logistics</i>
+   <i>собери madworld</i>
+   <i>покажи логи octopus</i>
+   <i>проверь деплой octopus</i> — это dry-run, ничего не разворачивается
 
 Или нажми кнопку внизу 👇 — там самые частые вещи.
 
@@ -771,12 +798,15 @@ async def run_daemon(rpc_echo: bool = False) -> None:
                     body = (env.get("text") or "")
                     ref = next((r for r in (env.get("refs") or []) if Path(str(r)).is_file()),
                                "")
-                    if len(body) > TG_TEXT_LIMIT and ref:
-                        # The message would be cut in the middle; the file carries the whole
-                        # report and the caption still says what happened.
+                    if len(body) > 1200:
+                        # 1200 — это ровно та граница, на которой текст раньше начинал
+                        # резаться (tg_line показывает 900–1200 символов) и владелец получал
+                        # путь к файлу на сервере, который с телефона не открыть. Теперь
+                        # полный текст уезжает документом .txt, а в сообщении остаётся шапка
+                        # и начало отчёта.
+                        path = ref or _stage_report(body)
                         head = tg_line(env).split("\n")[0]
-                        ok, detail = tg_send_document(
-                            ref, caption=f"{head}\n{esc(body[:600])}…")
+                        ok, detail = tg_send_document(path, caption=f"{head}\n\n{esc(body[:700])}…")
                         if not ok:
                             log(f"telegram document failed ({detail}); sending text")
                             ok, detail = tg_send(tg_line(env), channel=env.get("channel"))

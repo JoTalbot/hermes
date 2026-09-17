@@ -137,3 +137,28 @@ issues". Every Hermes gate is `[OK]`: bus transport / token / bridge / stream, f
 repeated ≤ every 6 h, resolutions reported); long reports leave as `.txt` documents instead of
 being cut at 1200 characters; `tests/run.sh` **112 passed · 0 failed · 0 skipped** (gate [13]
 covers protection, alert delivery, multipart and the tri-state metric).
+
+## Incidents 28–29 (2026-09-17, fourth pass — project actions and a silent filter)
+
+28. **The owner's own report was filtered out as "test noise".** `should_forward()` silenced
+    anything whose text contained the substring `selftest`. The bus selftest tags its
+    messages `selftest-HHMMSS`, but `прогони тесты в hermes-os` produces output containing
+    the line `ok   agents selftest` — so a real result of a real task was dropped before it
+    reached the phone, with no error anywhere. The filter now matches the tag
+    (`\bselftest-\d{4,8}\b`), and two contract tests pin both directions: a report that
+    merely mentions the word is forwarded, a tagged test message is not.
+    LESSON: a substring filter on human-readable output always eventually silences a human.
+
+29. **The verb reached the handler under a different name.** Routing carried the project
+    action as `action`, `project-run.sh` read `ARG_WHAT`: the owner asked for
+    `deploy-check`, got the *tests* path, and `/opt/octopus` answered «нет pytest». Nobody
+    would have noticed from the message alone — the run "succeeded". Both names are now set
+    (`action` and `what`) and the live logs show `action=deploy-check` producing the dry-run
+    section. LESSON: two names for one argument is a bug waiting for a demonstration.
+
+**Fourth-pass results (measured):** project agents 21 with a real `run` handler (handlers
+130 → **151**); `прогони тесты в hermes-os` executed `bash tests/run.sh` for 72 s, exit 0;
+`покажи логи octopus` returned the project's systemd journal; `проверь деплой octopus`
+honestly reported «в проекте нет ни цели deploy, ни compose-файла» and deployed nothing; a
+1747-character report arrived as a **`.txt` document** (2 KiB) instead of a truncated
+message; `tests/run.sh` **115 passed · 0 failed · 0 skipped**, `agents-selftest` **51/0**.

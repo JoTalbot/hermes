@@ -194,7 +194,13 @@ for f in sorted(glob.glob(f"{proj_dir}/*.yaml")):
     if units:  env["PROJECT_SERVICE"] = " ".join(units)
     if ctns:   env["PROJECT_CONTAINERS"] = " ".join(ctns)
     if health: env["PROJECT_HEALTH_URL"] = " ".join(health)
+    if ops.get("deploy") and ops["deploy"] != "DETECT":
+        env["PROJECT_DEPLOY"] = ops["deploy"]
+    # status — это отчёт. run — реальные действия в проекте (тесты/сборка/линт/логи/
+    # проверка деплоя). Что именно запускать, скрипт решает по маркерам самого проекта
+    # (Makefile/package.json/pytest), поэтому в handler нет подставляемых строк.
     h = {"status": {"run": f"bash {CHECKS}/project-check.sh", "env": env},
+         "run": {"run": f"bash {CHECKS}/project-run.sh", "env": env, "timeout": 420},
          "ask": None,
          "identity": None, "ping": None}
     purpose = (f"Project agent для {slug}: {path or 'путь не найден'} "

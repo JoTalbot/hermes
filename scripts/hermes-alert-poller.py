@@ -201,6 +201,30 @@ def save_state(state: dict) -> None:
         log(f"cannot save state: {type(e).__name__}: {e}")
 
 
+def housekeeping(max_age_days: int = 3) -> None:
+    """Убрать временные отчёты, которые уже ушли владельцу.
+
+    OBSERVATION: tests/probe-chat.py и обмен по 1200+ символов оставляют в
+    /var/lib/hermes-bus файлы reply-*.txt / report-*.txt. Без уборки каталог состояния
+    растёт бесконечно, а это ровно тот случай, когда «потом почистим» не наступает.
+    """
+    cutoff = time.time() - max_age_days * 86400
+    removed = 0
+    try:
+        for pattern in ("reply-*.txt", "report-*.txt"):
+            for f in STATE.parent.glob(pattern):
+                try:
+                    if f.stat().st_mtime < cutoff:
+                        f.unlink()
+                        removed += 1
+                except Exception:
+                    continue
+    except Exception as e:
+        log(f"housekeeping failed: {type(e).__name__}: {e}")
+    if removed:
+        log(f"housekeeping: removed {removed} staged report(s)")
+
+
 def cycle(state: dict, first_run: bool) -> dict:
     try:
         alerts = fetch_rules()
@@ -267,8 +291,12 @@ def main() -> int:
         f"повтор не чаще {REPEAT_AFTER // 3600} ч")
     state = load_state()
     first = True
+    last_housekeeping = 0.0
     while True:
         try:
+            if time.time() - last_housekeeping > 3600:
+                housekeeping()
+                last_housekeeping = time.time()
             state = cycle(state, first_run=first)
             save_state(state)
         except Exception as e:                     # never die: a poller that stops is silence

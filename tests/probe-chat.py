@@ -48,7 +48,21 @@ def handler_for(task: str) -> str:
     return runtime.route(task)["handler"]
 
 
+def route(task: str) -> dict:
+    return runtime.route(task)
+
+
 print("agents=%d" % len(runtime.agents))
+# ── project actions: a project agent must do real work, not describe itself ────
+print("ptask-tests=%s" % route("прогони тесты в logistics")["handler"])
+print("ptask-tests-what=%s" % route("прогони тесты в logistics")["action"])
+print("ptask-tests-subject=%s" % route("прогони тесты в logistics")["subject"])
+print("ptask-build=%s" % route("собери madworld")["action"])
+print("ptask-logs=%s" % route("покажи логи octopus")["action"])
+print("ptask-deploy=%s" % route("проверь деплой octopus")["action"])
+print("ptask-status-still-report=%s" % route("как дела в logistics")["handler"])
+print("ptask-needs-project=%s" % bool(route("прогони тесты")["capability"] == "" and
+                                     route("прогони тесты").get("need_project")))
 print("route-host=%s" % cap_for("проверить загрузку сервера"))
 print("route-project=%s" % cap_for("статус проекта logistics"))
 print("route-alias=%s" % cap_for("логистика статус"))
@@ -122,6 +136,20 @@ print("btn-task-map=%s" % B.BUTTON_TASKS.get("сервер"))
 rt = (ROOT / "agents" / "runtime.py").read_text()
 print("refusal-friendly=%s" % ("🤔 Не понял" in rt and "Известные возможности" not in rt))
 print("refusal-has-examples=%s" % ("аудит безопасности" in rt and "статус проекта logistics" in rt))
+
+# ── forwarding filter: silence for tests, never for real output ────────────────
+def _env(text: str, kind: str = "result", channel: str = "orchestrator") -> dict:
+    return {"text": text, "kind": kind, "channel": channel, "priority": "normal",
+            "node": B.server_id()}
+
+
+print("forward-real-report=%s" % B.should_forward(
+    _env("🛠 ПРОЕКТ hermes-os: ТЕСТЫ\n  ok   agents selftest\n  ════ 112 passed ════")))
+print("forward-selftest-tagged-silenced=%s" % (not B.should_forward(
+    _env("offline-replay selftest-022040"))))
+print("forward-error-always=%s" % B.should_forward(
+    _env("proj-octopus.run → FAIL (код 2)", kind="error")))
+
 
 # ── long reports: a document, not a truncated message ──────────────────────────
 # The bus used to cut agent output at 1200 characters and print a server path the owner

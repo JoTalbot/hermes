@@ -563,13 +563,31 @@ class Runtime:
             handler_hint = handler_hint or decision["handler"]
             analysis = decision["analysis"]
             if not capability and not target:
+                if decision.get("need_project"):
+                    # Понятно, ЧТО просят, непонятно ГДЕ. Отвечаем полезно: называем
+                    # проекты, в которых это можно выполнить.
+                    what = decision["need_project"]
+                    names = sorted(c.split(":", 1)[1] for a in self.agents.values()
+                                   for c in a.capabilities if c.startswith("project:"))
+                    await self.publish(nc, channel="orchestrator", kind="error",
+                                       text=(f"🤔 Понял: нужно «{what}», но не понял, "
+                                             f"в каком проекте.\n\n"
+                                             f"Скажи, например:\n"
+                                             f"• прогони тесты в logistics\n"
+                                             f"• покажи логи madworld\n"
+                                             f"• проверь деплой octopus\n\n"
+                                             f"Проекты: {', '.join(names[:12])}"
+                                             + (" …" if len(names) > 12 else "")),
+                                       correlation=env.get("id"), agent=agent.id)
+                    return
                 await self.publish(nc, channel="orchestrator", kind="error",
                                    text=(f"🤔 Не понял: «{task[:120]}»\n\n"
                                          "Уточни направление — например:\n"
                                          "• проверить загрузку сервера\n"
                                          "• сделать бэкап\n"
                                          "• аудит безопасности\n"
-                                         "• статус проекта logistics\n\n"
+                                         "• статус проекта logistics\n"
+                                         "• прогони тесты в logistics\n\n"
                                          "Кто есть в команде: спроси «какие агенты»"),
                                    correlation=env.get("id"), agent=agent.id)
                 return
@@ -614,7 +632,7 @@ class Runtime:
         # The subject/action travel with the task: the target must investigate THAT process
         # or container, and (for `act`) know which verb was asked for.
         payload = {"handler": handler, "facts_handler": facts_with}
-        for key in ("subject", "action"):
+        for key in ("subject", "action", "what"):
             if decision_args.get(key):
                 payload[key] = decision_args[key]
         await self.publish(nc, channel=None, to=target, kind="task",

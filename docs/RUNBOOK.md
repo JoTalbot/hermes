@@ -499,3 +499,43 @@ from a phone: a reply or forwarded report longer than 3200 characters leaves as 
 document** with a one-line caption (`sendDocument`, multipart written by hand — no extra
 dependency in the bus venv). If the upload fails, the text path is still tried: silence is
 never an option.
+
+## Project agents: real actions, not descriptions (2026-09-17)
+
+Before this, a project agent had exactly one handler — `status` — so «почему падают тесты»
+returned a directory listing. Now every project agent has `run`, and the router understands
+the verb in the sentence:
+
+| what the owner types | handler | what actually happens |
+|---|---|---|
+| `прогони тесты в logistics` | `run` (`ARG_WHAT=tests`) | test command of THAT project |
+| `собери madworld` | `run` (`build`) | build command of that project |
+| `линт octopus` | `run` (`lint`) | lint command of that project |
+| `покажи логи octopus` | `run` (`logs`) | `docker compose logs`, the project's systemd unit, or its `*.log` |
+| `проверь деплой octopus` | `run` (`deploy-check`) | **dry-run plan only** — `make -n deploy` / `docker compose config`, nothing is deployed |
+| `как дела в logistics` | `status` | the previous read-only report |
+
+The command is **never guessed**: `agents/checks/project-run.sh` looks for a real marker in
+the repository — a `test`/`build`/`lint`/`deploy` target in the `Makefile`, a script in
+`package.json`, `pytest.ini`/`[tool.pytest]`/`tests/test_*.py`, `tests/run.sh`,
+`go.mod`, `Cargo.toml`, a compose file, a declared unit, a `*.log`. If nothing matches, the
+agent refuses and names what it looked for; a plausible-but-wrong command in someone
+else's repository is worse than a refusal.
+
+FACT (2026-09-17): neither `pytest` nor `ruff` is installed system-wide on arm-server-01, so
+for `/opt/logistics` and `/opt/octopus` the answer is «в проекте есть тесты, но в
+/usr/bin/python3 нет pytest» plus the exact command to fix it — instead of a fake green run.
+`/opt/hermes` runs its own `tests/run.sh`, which is how `прогони тесты в hermes-os` really
+executes the 112-check suite (measured: 72 s, exit 0). Project Python is preferred when the
+project has a venv (`.venv/bin/python`); object names taken from a project's own compose file
+are validated against `^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$` and quoted, so nothing from a
+repository can become shell code.
+
+Two consequences worth knowing:
+
+* A report longer than 1200 characters now leaves as a **`.txt` document** (measured live:
+  `telegram: sent document proj-hermes-os-run-….log (2 KiB)`), not as the first 900
+  characters plus a server path. Short answers stay messages.
+* The Telegram noise filter matches the bus selftest **tag** (`selftest-HHMMSS`), not the bare
+  word `selftest`: a real report containing the line `ok agents selftest` used to be
+  swallowed, so the owner never saw the result of the task he had just asked for.

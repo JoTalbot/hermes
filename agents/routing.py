@@ -75,6 +75,30 @@ ANALYSIS_CUES = (r"почему|отчего|проанализ|объясн|р�
 # points at something the runtime cannot serve.
 BUILTIN_HANDLERS = {"identity", "ping", "dispatch", "agents", "skills", "pending", "ask"}
 
+# Действия НАД ПРОЕКТОМ: «прогони тесты в logistics», «покажи логи madworld»,
+# «проверь деплой octopus». Раньше у проектного агента был только «покажи статус», поэтому
+# вопрос «почему падают тесты» заканчивался дампом дерева. Здесь мы понимаем, ЧТО просят,
+# а какую именно команду запускать — решает сам проект (agents/checks/project-run.sh:
+# цель в Makefile, скрипт в package.json, pytest-конфиг…). Ничего не угадывается.
+PROJECT_TASK_RULES: list[tuple[str, str]] = [
+    (r"deploy[- ]?check|dry[- ]?run|дридран|проверь деплой|что задеплоится|план деплоя|"
+     r"проверь развёртывание", "deploy-check"),
+    (r"тест|протестир|pytest|npm test|прогон тестов|проверь тесты", "tests"),
+    (r"собер|сборк|билд|\bbuild\b|скомпил", "build"),
+    (r"\blint\b|линт|flake8|ruff|стиль кода", "lint"),
+    (r"\bлоги\b|лог[аиов]\b|журнал|вывод программ", "logs"),
+]
+
+
+def parse_project_task(task: str) -> str:
+    """Что просят сделать с проектом: tests / build / lint / logs / deploy-check (или "")."""
+    low = (task or "").lower()
+    for rx, what in PROJECT_TASK_RULES:
+        if re.search(rx, low):
+            return what
+    return ""
+
+
 PROJECT_ALIASES: dict[str, str] = {
     "логистик": "logistics", "логист": "logistics", "logist": "logistics",
     "октопус": "octopus", "осьминог": "octopus",
@@ -185,26 +209,22 @@ def route(task: str, agents: dict) -> dict:
     # 1. a project named in the task is the most specific signal
     projects = sorted(((c, c.split(":", 1)[1]) for c in caps if c.startswith("project:")),
                       key=lambda p: -len(p[1]))
+    what = parse_project_task(task)
     for cap, name in projects:
-        if re.search(rf"\b{re.escape(name.lower())}\b", low):
-            out.update(capability=cap, why=f"проект «{name}»", handler="status",
-                       facts_handler="status")
-            return _finish(out, low)
+        if _project_hit(name, low):
+            return _project_out(out, cap, name, what, f"проект «{name}»", low)
     for alias, target in PROJECT_ALIASES.items():
         if alias in low:
             hits = [n for _, n in projects if n.lower().startswith(target)]
             if hits:
                 name = min(hits, key=len)
-                out.update(capability=f"project:{name}", why=f"проект «{name}» (синоним)",
-                           handler="status", facts_handler="status")
-                return _finish(out, low)
+                return _project_out(out, f"project:{name}", name, what,
+                                    f"проект «{name}» (синоним)", low)
     for cap, name in sorted(((c, c.split(":", 1)[1]) for c in caps
                              if c.startswith("project:")), key=lambda p: len(p[1])):
         stem = name.split("-")[0]
         if len(stem) > 4 and stem.lower() in low:
-            out.update(capability=cap, why=f"проект «{name}»", handler="status",
-                       facts_handler="status")
-            return _finish(out, low)
+            return _project_out(out, cap, name, what, f"проект «{name}»", low)
 
     # 2. intent table, first match wins
     for rx, cap, label, handler in INTENT_RULES:
@@ -218,6 +238,14 @@ def route(task: str, agents: dict) -> dict:
                     # no name given: "что жрёт процессор" is the general load question
                     out.update(handler="top", facts_handler="top", why="загрузка CPU")
             return _finish(out, low)
+
+    # 2b. «прогони тесты» без проекта: не угадываем чужой репозиторий, но и не молчим
+    if what and not out.get("capability"):
+        # Действие понято, проект — нет. Отказ должен это сказать прямо: «прогони тесты»
+        # без проекта раньше превращалось в отчёт случайного агента.
+        out.update(capability="", why=f"проект не назван для «{what}»", handler="",
+                   need_project=what)
+        return out
 
     # 3. maybe the task simply names an agent
     for tok in re.findall(r"[a-z0-9][a-z0-9\-]{2,}", low):
@@ -233,6 +261,42 @@ def route(task: str, agents: dict) -> dict:
                    facts_handler="status")
         return out
     return out
+
+
+def _project_hit(name: str, low: str) -> bool:
+    """Узнаём проект по имени, по «proj-<slug>» и по дефисам/подчёркиваниям вместо пробелов.
+
+    FACT: раньше «покажи логи proj-orchestrator» уходило к агенту orchestrator (совпадение
+    по имени агента), потому что имя проекта ищется целиком, а владелец пишет без префикса
+    или с другим разделителем.
+    """
+    cands = {name.lower(), name.lower().replace("-", "_"), name.lower().replace("_", "-")}
+    if name.lower().startswith("proj-"):
+        cands.add(name[5:].lower())
+    for c in cands:
+        if re.search(rf"\b{re.escape(c)}\b", low):
+            return True
+        # "real-time" и "realtime": разделитель может быть опущен
+        if re.search(rf"\b{re.escape(c.replace('-', '').replace('_', ''))}\b", low):
+            return True
+    return False
+
+
+def _project_out(out: dict, cap: str, name: str, what: str, why: str, low: str) -> dict:
+    """Проект назван: либо конкретное действие, либо обычный статус.
+
+    «прогони тесты в logistics» → handler=run, action=tests (реальный запуск проверок),
+    «как дела в logistics»      → handler=status (прежний отчёт).
+    """
+    if what:
+        # `action` — потому что так зовётся аргумент у act-хендлера, `what` — понятное имя
+        # для скрипта проекта (ARG_WHERE). Оба уезжают в env задачи, чтобы скрипт не гадал.
+        out.update(capability=cap, why=f"{why}: {what}", handler="run", facts_handler="run",
+                   subject=name, action=what, what=what)
+    else:
+        out.update(capability=cap, why=why, handler="status", facts_handler="status",
+                   subject=name)
+    return _finish(out, low)
 
 
 def subject(task: str) -> str:

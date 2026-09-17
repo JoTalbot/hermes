@@ -183,6 +183,11 @@ ck "the refusal teaches by example" "refusal-has-examples=True" "$CHAT_PROBE"
 ck "a long report leaves as a file, not a truncated message" "long-reply-is-document=True" "$CHAT_PROBE"
 ck "a short answer is still a message" "short-reply-is-message=True" "$CHAT_PROBE"
 ck "the uploaded report is valid multipart (CRLF framing)" "multipart-crlf=True" "$CHAT_PROBE"
+ck "a real report mentioning a selftest word still reaches the owner" \
+   "forward-real-report=True" "$CHAT_PROBE"
+ck "tagged bus-selftest messages stay off the phone" \
+   "forward-selftest-tagged-silenced=True" "$CHAT_PROBE"
+ck "a failed handler always reaches the owner" "forward-error-always=True" "$CHAT_PROBE"
 echo "[12] agents: capabilities, answer format and model policy"
 if bash tests/agents-selftest.sh >/tmp/agents-selftest.out 2>&1; then
   ck "agents selftest" "PASS=" "$(grep -o 'PASS=[0-9]* FAIL=[0-9]*' /tmp/agents-selftest.out | tail -1)_$(echo ok)"

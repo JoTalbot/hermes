@@ -88,6 +88,62 @@ ck "в act.sh нет оболочки и eval" \
 ck "действия ограничены списком (не произвольный shell)" \
    "$(grep -c 'UNIT_ALLOW' agents/checks/act.sh)" "2"
 
+echo "[4c] project actions: агент проекта делает работу, а не описывает её"
+# Фикстуры — настоящие маленькие проекты: так проверяется распознавание команд, а не
+# строчки в коде. PROJECT_RUN_DRY=1 показывает найденную команду и ничего не запускает.
+FIX=/tmp/hermes-selftest-projects; rm -rf "$FIX"; mkdir -p "$FIX/make" "$FIX/npm" "$FIX/py/tests"
+cat > "$FIX/make/Makefile" <<'MK'
+test:
+	@echo FIXTURE-TESTS-OK
+build:
+	@echo FIXTURE-BUILD-OK
+lint:
+	@echo FIXTURE-LINT-OK
+deploy:
+	@echo FIXTURE-DEPLOY-OK
+MK
+cat > "$FIX/npm/package.json" <<'JS'
+{"name": "fix", "scripts": {"test": "echo ok", "lint": "echo ok"}}
+JS
+printf 'def test_x():\n    assert True\n' > "$FIX/py/tests/test_x.py"
+printf '[tool.pytest.ini_options]\n' > "$FIX/py/pyproject.toml"
+
+pr() {   # pr <project> <what> -> stdout скрипта
+  PROJECT_SLUG=fix PROJECT_PATH="$1" ARG_WHAT="$2" PROJECT_RUN_DRY=1 \
+    bash agents/checks/project-run.sh 2>&1
+}
+
+ck "цель test в Makefile распознана" "$(pr "$FIX/make" tests)" "make test"
+ck "цель build в Makefile распознана" "$(pr "$FIX/make" build)" "make build"
+ck "цель lint в Makefile распознана" "$(pr "$FIX/make" lint)" "make lint"
+ck "скрипт test в package.json распознан" "$(pr "$FIX/npm" tests)" "npm run --silent test"
+ck "pytest-проект распознан (запуск или честный отказ про pytest)" "$(pr "$FIX/py" tests)" "pytest"
+ck "проверка деплоя — только план, без развёртывания" "$(pr "$FIX/make" deploy-check)" "не разворачивается"
+ck "dry-run деплоя использует make -n, а не make deploy" "$(pr "$FIX/make" deploy-check)" "make -n deploy"
+ck "неизвестное действие отклоняется" "$(pr "$FIX/make" vacuum-disk)" "неизвестное действие"
+ck "чужой каталог не запускается наугад" \
+   "$(PROJECT_SLUG=fix PROJECT_PATH=/no/such/dir ARG_WHAT=tests PROJECT_RUN_DRY=1 bash agents/checks/project-run.sh 2>&1)" \
+   "каталога проекта нет на этом сервере"
+# ARG_WHAT читается в переменную и сверяется с белым списком (это нормально); запрещено
+# другое: собрать из строки задачи команду и отдать её оболочке. eval — прямой признак.
+ck "в project-run.sh нет eval (нет произвольной оболочки)" \
+   "$(grep -vE '^[[:space:]]*#' agents/checks/project-run.sh | grep -cE '(^|[^a-z])eval ')" "0"
+ck "действие сверяется с белым списком" \
+   "$(grep -c 'разрешено: tests, build, lint, logs, deploy-check' agents/checks/project-run.sh)" "1"
+ck "имена и пути из проекта цитируются (printf %q)" \
+   "$(grep -c "printf -v q '%q'" agents/checks/project-run.sh)" "1"
+ck "имя сервиса из чужого compose проверяется по белому списку" \
+   "$(grep -c 'A-Za-z0-9\]\[A-Za-z0-9_.-' agents/checks/project-run.sh)" "1"
+ck "deploy-check никогда не поднимает контейнеры" \
+   "$(grep -c 'docker compose up' agents/checks/project-run.sh)" "0"
+
+# Настоящий прогон, не dry-run: фикстура должна реально выполниться и вернуть свой маркер.
+REAL="$(PROJECT_SLUG=fix PROJECT_PATH="$FIX/make" ARG_WHAT=tests bash agents/checks/project-run.sh 2>&1)"
+ck "реальный прогон выполняет команду проекта" "$REAL" "FIXTURE-TESTS-OK"
+ck "реальный прогон сообщает код возврата" "$REAL" "код возврата"
+ck "реальный прогон заканчивается советом" "$REAL" "ЧТО ДЕЛАТЬ"
+rm -rf "$FIX"
+
 echo "[5] live: the balancer answers through the shim"
 if command -v curl >/dev/null && curl -s -m 5 http://127.0.0.1:9700/v1/models >/dev/null 2>&1; then
   MODELS=$(curl -s -m 5 http://127.0.0.1:9700/v1/models | "$PYBIN" -c "
