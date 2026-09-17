@@ -211,8 +211,12 @@ def ask(question: str, facts: str, agent_id: str, purpose: str = "", node: str =
                     served_tier=str(served.get("tier") or ""),
                     provider=str(served.get("provider") or ""),
                     cached=bool(served.get("cached")))
+        meta["provider_tier"] = str(served.get("provider_tier") or "")
         want = TIER_SERVED_NAME.get(model)
-        if want and meta["served_tier"] and want != meta["served_tier"]:
+        # Расхождение бывает двух видов: ответил другой бакет и ответил провайдер другого
+        # тира (тогда бакет совпадает, а модель — дешёвая). Оба означают потерю умности.
+        if want and ((meta["served_tier"] and want != meta["served_tier"])
+                     or (meta["provider_tier"] and want != meta["provider_tier"])):
             meta["tier_mismatch"] = True
         if text:
             return text, meta

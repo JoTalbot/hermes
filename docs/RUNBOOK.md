@@ -775,12 +775,32 @@ the tier and provider that actually answered (`aios.tier`, `aios.provider`, `aio
 `модель hermes-reason · groq-gpt-oss-20b [fast] ⚠️ ответил не тот тир`. A green metric no longer
 means "we asked the smart model" — it means "the smart model answered".
 
-**Still open (needs the owner's decision).** Making the tier real is a 2-line, additive change in
-the AIOS bridge (`tier: Optional[str]` in `GoalRequest` + `task_type=req.tier or "auto"` in the
-handler). It is another project's service, so it is not touched without consent; until then the
-escalation keeps working only because our own escalation keywords («почему», «проанализируй»,
-diffs, long documents) happen to be the same words the balancer's classifier looks for, and
-`hermes-local` is never honoured.
+**The tier is real now (2026-09-17, with the owner's consent).** The AIOS bridge carries
+`tier: Optional[str]` in `GoalRequest` and passes `task_type=(req.tier or "auto")` into
+`llm_balancer.ask`; without a tier the behaviour is exactly as before, so other consumers are
+untouched. Backup, unified diff and rollback live in `/var/backups/hermes/`:
+
+```bash
+cp -a /var/backups/hermes/octopus-aios-server.py.<stamp>.bak /opt/octopus-aios-server.py
+systemctl restart octopus-aios.service
+# проверка после отката: curl -s localhost:9600/health
+```
+
+Measured after the change (unique prompts, no cache): `fast → groq-gpt-oss-20b`,
+`reasoning → groq-gpt-oss-120b`, `long_context → gemini-2.5-flash`, and a request without a tier
+still lands on the old classifier (`tier=fast`). Gate [18] re-checks this live, so a revert of the
+bridge fails the tests instead of silently costing smartness.
+
+**Two tiers are still broken for reasons outside our control** (the telemetry now says so instead
+of hiding it — `⚠️ ответил не тот тир` in the answer, `HermesModelTierMismatch` alert):
+
+* **code** — `mistral-small` answers `HTTP 429 (Rate limited)` and `hf-Qwen2.5-72B-Instruct` has no
+  `HUGGINGFACE_API_KEY` and its host does not resolve (`[Errno -5] No address associated with
+  hostname`). A `hermes-code` request is therefore served by `groq-gpt-oss-20b` (fast tier).
+  Needs a working key or another code provider in the balancer.
+* **local** — the `ollama` service on this box is inactive, so the local tier returns the
+  balancer's boilerplate, which the shim refuses (502) and the agent answers with facts alone.
+  `systemctl start ollama` would restore the free on-box path (a 3B model, ~2 GB RAM on first use).
 
 **After deploying agent code, restart the unit.** Python caches imports at start, so a fixed
 `agents/routing.py` keeps answering by the old rules until `hermes-agents` is restarted (same for

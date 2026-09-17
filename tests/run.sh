@@ -568,6 +568,10 @@ ck "the run history keeps the provider that answered" '"provider": meta.get' \
    "$(grep -o '"provider": meta.get' agents/runtime.py | head -1)"
 ck "the exporter exposes served tiers" "hermes_model_served_1h" \
    "$(grep -o 'hermes_model_served_1h' scripts/hermes_metrics_exporter.py | head -1)"
+ck "the shim knows which tier each provider belongs to" "provider_tier" \
+   "$(grep -o 'provider_tier' deploy/shim/aios_openai_shim.py | head -1)"
+ck "an off-tier provider counts as a mismatch" "provider_off" \
+   "$(grep -o 'provider_off' deploy/shim/aios_openai_shim.py | head -1)"
 ck "the exporter exposes tier mismatches" "hermes_model_tier_mismatch_1h" \
    "$(grep -o 'hermes_model_tier_mismatch_1h' scripts/hermes_metrics_exporter.py | head -1)"
 
@@ -591,8 +595,29 @@ PY
 )"
   ck "live: the answer names the provider that served it" "телеком-провайдер-ок" "$ANS"
   ck "live: the served tier is a real balancer tier" "телеком-тир-ок" "$ANS"
+  # Регресс-тест правки моста AIOS: запрошенный тир должен доходить до провайдера.
+  # Если мост вернут в исходное состояние (поле tier игнорируется), эта проверка упадёт.
+  TIERED="$(./.venv-bus/bin/python - <<'PY' 2>/dev/null
+import sys, time
+sys.path.insert(0, "agents")
+import models
+_, meta = models.ask("Проба %d: назови столицу Франции одним словом" % int(time.time()),
+                     "факты: справочник недоступен", "server-guardian",
+                     purpose="проверка эскалации", model="hermes-reason", timeout=40)
+print("тир-эскалации-ок" if meta.get("provider_tier") == "reasoning" else
+      "тир-эскалации-НЕТ provider=%s provider_tier=%s served=%s" % (
+          meta.get("provider"), meta.get("provider_tier"), meta.get("served_tier")))
+PY
+)"
+  ck "live: asking for the reasoning tier reaches a reasoning model" "тир-эскалации-ок" "$TIERED"
+  if [[ -f /opt/octopus-aios-server.py ]]; then
+    ck "live: the AIOS bridge passes the requested tier on" "task_type=(req.tier" \
+       "$(grep -o 'task_type=(req.tier' /opt/octopus-aios-server.py | head -1)"
+  else
+    ((SKIP++)); echo "  ~ AIOS bridge check skipped (файла нет на этом хосте)"
+  fi
 else
-  ((SKIP++)); ((SKIP++)); echo "  ~ live model telemetry checks skipped (нет venv шины)"
+  ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); echo "  ~ live model telemetry checks skipped (нет venv шины)"
 fi
 
 

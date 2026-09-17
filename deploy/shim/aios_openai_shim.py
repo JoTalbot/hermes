@@ -130,6 +130,9 @@ STATS = {
 # Что реально ответило (тир балансировщика) за время жизни процесса.
 SERVED_TIERS: dict[str, int] = {}
 _TIER_MISMATCH_LAST_LOG = [0.0]
+# Кэш карты «провайдер → тир» из /health балансировщика: поле tier в его ответе —
+# это запрошенный бакет, и при упавшем провайдере отвечает модель другого тира.
+_PROVIDER_TIERS: dict[str, object] = {"at": 0.0, "map": {}}
 
 
 def _post_json(path: str, payload: dict) -> tuple[int, dict]:
@@ -539,6 +542,24 @@ def _is_fallback(data: dict, text: str) -> bool:
     return any(marker in head for marker in FALLBACK_MARKERS)
 
 
+def _provider_tiers() -> dict:
+    """provider -> tier по данным самого балансировщика (обновляется раз в 5 минут)."""
+    now = time.time()
+    if _PROVIDER_TIERS["map"] and now - float(_PROVIDER_TIERS["at"] or 0) < 300:
+        return _PROVIDER_TIERS["map"]      # type: ignore[return-value]
+    try:
+        with urllib.request.urlopen(BRIDGE + "/health", timeout=4) as r:
+            d = json.loads(r.read())
+        m = {p.get("name"): p.get("tier")
+             for p in ((d.get("llm_balancer") or {}).get("providers") or [])
+             if p.get("name")}
+        if m:
+            _PROVIDER_TIERS["at"], _PROVIDER_TIERS["map"] = now, m
+    except Exception:
+        pass
+    return _PROVIDER_TIERS["map"]          # type: ignore[return-value]
+
+
 def _served_info(data: dict) -> dict:
     """Кто действительно ответил: тир и провайдер балансировщика.
 
@@ -547,21 +568,30 @@ def _served_info(data: dict) -> dict:
     тексту промпта. Без этой функции агент считал отвечавшую модель той, которую просил.
     """
     d = data or {}
-    return {"tier": str(d.get("tier") or ""), "provider": str(d.get("provider") or ""),
-            "cached": bool(d.get("cached"))}
+    provider = str(d.get("provider") or "")
+    bare = provider.replace(" (cached)", "").strip()
+    return {"tier": str(d.get("tier") or ""), "provider": provider, "cached": bool(d.get("cached")),
+            # Тир самого провайдера: he asked for code, mistral is down, groq (fast) answered.
+            "provider_tier": str(_provider_tiers().get(bare) or "")}
 
 
 def note_served(tier_asked: str | None, served: dict) -> None:
     """Учесть факт ответа и сказать громко, если ответил не тот тир, что просили."""
     st = served.get("tier") or "?"
     SERVED_TIERS[st] = SERVED_TIERS.get(st, 0) + 1
-    if tier_asked and served.get("tier") and tier_asked != served["tier"]:
+    prov = served.get("provider") or "?"
+    prov_tier = str(served.get("provider_tier") or "")
+    bucket_off = bool(tier_asked and served.get("tier") and tier_asked != served["tier"])
+    # Провайдер другого тира — это не «мелочь»: именно так «умный» запрос обслуживает
+    # дешёвая модель, когда провайдер нужного тира помечен нездоровым.
+    provider_off = bool(tier_asked and prov_tier and tier_asked != prov_tier)
+    if bucket_off or provider_off:
         STATS["tier_mismatch_total"] += 1
         now = time.time()
         if now - _TIER_MISMATCH_LAST_LOG[0] > 60:          # не спамить журнал
             _TIER_MISMATCH_LAST_LOG[0] = now
-            print(f"tier mismatch: asked {tier_asked}, balancer served {st} "
-                  f"via {served.get('provider') or '?'}", file=sys.stderr, flush=True)
+            print(f"tier mismatch: asked {tier_asked}, answered by {prov}"
+                  f" (tier={prov_tier or st})", file=sys.stderr, flush=True)
 
 
 def _ask_balancer(payload: dict, attempts: int = 1) -> tuple[int, dict, str]:

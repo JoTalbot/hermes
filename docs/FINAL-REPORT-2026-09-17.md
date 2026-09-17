@@ -152,8 +152,22 @@ The owner asked for a check of the agents' LLM path. Result: the path works, the
   `модель hermes-reason · groq-gpt-oss-20b [fast] ⚠️ ответил не тот тир`, and gate [18] checks it
   statically and live. Measured after the fix on the live path: history record
   `tier=hermes-reason · served_tier=code · provider=groq-gpt-oss-20b · tier_mismatch=True`.
-* **Open:** the real fix is a 2-line additive change in the AIOS bridge (another project) — waiting
-  for the owner's decision.
+* **Fixed at the source (owner approved):** the AIOS bridge now carries `tier` in `GoalRequest`
+  and passes `task_type=(req.tier or "auto")` to the balancer, so the requested tier picks the
+  provider (measured: `reasoning → groq-gpt-oss-120b`, `long_context → gemini-2.5-flash`), while a
+  request without a tier behaves exactly as before. Backup, diff and rollback are in
+  `/var/backups/hermes/`; gate [18] fails if the bridge is ever reverted.
+* **Still broken for reasons that need keys or a service, not code:** the **code** tier has no
+  working provider (`mistral-small` returns HTTP 429, `hf-Qwen2.5-72B-Instruct` has no API key and
+  an unresolvable host), so `hermes-code` requests are served by a fast model; and the **local**
+  tier is down because `ollama` is inactive on the node (`systemctl start ollama` restores it,
+  ~2 GB RAM on first use — the owner's call). Both are now visible: `⚠️ ответил не тот тир` in the
+  answer and the `HermesModelTierMismatch` alert instead of silence.
+
+**Numbers after this wave:** `tests/run.sh` **248 passed · 0 failed · 0 skipped** (gates [17]
+and [18]), Prometheus loads **26 rules** including the new `HermesModelTierMismatch`, and the
+shim's own counters (`llm_served_tier_total`, `llm_tier_mismatch_total`) show which tier served
+each request.
 
 **Lesson from the batch:** after deploying agent code the unit must be restarted (Python caches
 imports at start); a fixed `routing.py` keeps answering by the old rules otherwise. `hermes-agents`

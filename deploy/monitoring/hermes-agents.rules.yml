@@ -162,6 +162,25 @@ groups:
             history lists each failure with its exit code and log file — `bash
             agents/checks/history.sh` (or «что делали агенты» in Telegram) shows them."
 
+      # FACT (2026-09-17): агент просил "умный" тир, а отвечала дешёвая модель. Теперь это
+      # измеряется (hermes_model_tier_mismatch_1h) и должно доходить до владельца: потери
+      # умности не видны в обычных метриках — ответы приходят, просто не те.
+      - alert: HermesModelTierMismatch
+        expr: sum(hermes_model_tier_mismatch_1h) > 2
+        for: 10m
+        labels:
+          severity: warning
+          area: llm
+        annotations:
+          summary: "Модель отвечает не тем тиром, который просили ({{ $value }} за час)"
+          description: >-
+            Агент запросил тир (reasoning/code/long_context/local), а ответила модель другого
+            тира. Проверить: curl -s localhost:9700/metrics | grep tier_mismatch и
+            curl -s localhost:9600/api/v1/aios/status (здоровье провайдеров). Известные причины:
+            тир code — mistral-small отдаёт HTTP 429, у hf-Qwen2.5-72B нет ключа и его хост не
+            разрешается; тир local — служба ollama на узле выключена.
+          runbook: docs/RUNBOOK.md
+
       - alert: HermesModelFallbackStorm
         expr: sum(hermes_model_fallbacks_1h) >= 3
         for: 10m

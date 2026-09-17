@@ -662,6 +662,7 @@ class Runtime:
             "model": meta.get("model") or "",
             "served_tier": meta.get("served_tier") or "",
             "provider": meta.get("provider") or "",
+            "provider_tier": meta.get("provider_tier") or "",
             "cached": bool(meta.get("cached")),
             "tier_mismatch": bool(meta.get("tier_mismatch")),
             "fallback": meta.get("fallback") or (f"escalated from {meta['escalated_from']}"
