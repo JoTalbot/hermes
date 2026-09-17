@@ -74,3 +74,18 @@ four times and then added a comment asking for clarification, which no human ans
 
 Adding a **comment** with the dependency's ID is worth it: small models read the
 comment stream more reliably than they infer relationships from parent links.
+
+## Tier policy (2026-09-17)
+
+`config/models.yaml` + `agents/models.py` decide which model each agent uses. Rules:
+
+1. **Deterministic handlers use no model at all.** A load average is not a matter of opinion;
+   `top`, `disk`, `alerts`, `audit` are scripts, so most answers cost nothing.
+2. **Routine model work stays on the free fast tier** (Groq/Cerebras free keys).
+3. **Escalate only for shape of task:** analysis → `hermes-reason`, code → `hermes-code`,
+   long context → `hermes-long`. The escalation is logged with its reason.
+4. **Degrade, never fail:** balancer down → local Ollama → facts alone.
+5. **No provider keys in agents.** The policy names tiers; only the balancer holds keys.
+
+Measured evidence (2026-09-17): `ask` on the host question answered in ~1.1-1.4 s via
+`hermes-reason` (Groq gpt-oss-120b, free tier), while Hermes' own CPU footprint stayed ~2 %.

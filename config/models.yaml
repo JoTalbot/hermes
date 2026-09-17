@@ -1,0 +1,42 @@
+# config/models.yaml — which model each agent uses.
+#
+# The rule from the owner: prefer free/cheap models, but do not lose smartness where the
+# smart model is the point. Agents never hold provider keys — they name a TIER, and the LLM
+# Balancer (11 providers, behind the shim on 127.0.0.1:9700) picks the actual provider.
+#
+# Tier → providers behind it (measured 2026-09-17, all free or cheap):
+#   hermes-fast   fast        groq-gpt-oss-20b, groq-qwen3.8-27b, cerebras-llama3.3-70b
+#   hermes-reason reasoning   groq-gpt-oss-120b
+#   hermes-code   code        mistral-small, hf-Qwen2.5-72B-Instruct
+#   hermes-long   long_context gemini-2.5-flash
+#   hermes-local  local       ollama-qwen2.5:1.5b, ollama-llama3.2:3b  (free, on this box)
+#   hermes-auto   —           balancer decides by weight and health
+#
+# Deterministic handlers (status, top, disk, alerts, audit…) do NOT use a model at all — a
+# load average is not a matter of opinion. Models are used only for `ask`: explaining facts,
+# planning, judging risk, reading code.
+default: hermes-fast
+local: hermes-local          # degradation path when the balancer is unreachable
+
+# Per-agent profile — routine work on the free tier.
+agents:
+  orchestrator: hermes-reason      # routing/planning judgements; still a free-tier key
+  security: hermes-reason          # risk assessment, exposure analysis
+  github: hermes-code              # diffs, code reading, review
+  server-guardian: hermes-fast     # diagnosis over its own measurements
+  monitoring: hermes-fast          # alert triage
+  backup: hermes-fast              # archive/recovery reasoning
+  # project agents inherit `default` and escalate by task shape
+
+# Escalation by task shape — applied automatically, logged with the reason.
+escalate:
+  analysis: hermes-reason          # «почему», «проанализируй», «рекомендации», «план», «риск»
+  code: hermes-code                # diff, review, refactor, tests
+  long: hermes-long                # summaries over journals/logs/many files
+
+# Guardrails
+limits:
+  max_tokens: 700                  # per answer: a chat message, not an essay
+  timeout_s: 45
+  # Escalation is a decision, not a default: every use is recorded in the agent log with the
+  # model alias, so cost drift is visible in `journalctl -u hermes-agents`.

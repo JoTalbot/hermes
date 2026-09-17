@@ -1,31 +1,37 @@
 #!/usr/bin/env bash
-# GitHub source-of-truth report: every git repo on this box, then the GitHub view.
-set -uo pipefail
-REPOS="${REPOS:-/opt/hermes /opt/aios /opt/logistics /opt/madworld /opt/octopus-browser /opt/orchestrator /opt/words}"
-echo "LOCAL REPOS"
-for r in $REPOS; do
-  [ -d "$r/.git" ] || continue
-  cd "$r" || continue
-  br=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-  head=$(git rev-parse --short HEAD 2>/dev/null)
-  dirty=$(git status --porcelain 2>/dev/null | wc -l)
-  ab=$(git rev-list --left-right --count "@{u}...HEAD" 2>/dev/null | awk '{print "behind="$1" ahead="$2}')
-  last=$(git log -1 --format=%cd --date=short 2>/dev/null)
-  printf "  %-24s %-10s %-9s dirty=%-4s %s last=%s\n" "$(basename "$r")" "$br" "$head" "$dirty" "${ab:-no-upstream}" "$last"
+# GitHub: состояние репозитория Hermes, изменения, отправленное, сканер секретов. Read-only.
+source "$(dirname "${BASH_SOURCE[0]}")/lib/report.sh"
+report_header "🐙 GITHUB И РЕПОЗИТОРИЙ"
+
+cd /opt/hermes 2>/dev/null || { report_bad "нет /opt/hermes"; exit 0; }
+BR=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+DIRT=$(git status --porcelain 2>/dev/null | wc -l)
+AHEAD=$(git rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)
+BEHIND=$(git rev-list --count 'HEAD..@{u}' 2>/dev/null || echo 0)
+
+report_section "📚 РЕПОЗИТОРИЙ hermes"
+report_kv "ветка" "$BR"
+[[ "$DIRT" -eq 0 ]] && report_ok "рабочее дерево чистое" || report_warn "изменений: $DIRT"
+[[ "$AHEAD" -eq 0 ]] && report_ok "всё отправлено в origin" || report_warn "не отправлено коммитов: $AHEAD"
+[[ "$BEHIND" -eq 0 ]] && report_ok "нет отставания от origin" || report_warn "отставание: $BEHIND коммитов (нужен pull)"
+
+report_section "🕐 ПОСЛЕДНИЕ КОММИТЫ"
+git log -5 --format='  %h %ad %s' --date=short 2>/dev/null | cut -c1-100
+
+report_section "🔍 СКАНЕР СЕКРЕТОВ"
+R=$(bash scripts/secret-scan.sh --worktree 2>&1 | tail -1)
+[[ "$R" == *clean* ]] && report_ok "секретов не найдено (рабочее дерево)" || report_bad "$R"
+
+report_section "📦 ДРУГИЕ РЕПОЗИТОРИИ"
+for d in /opt/logistics /opt/octopus /opt/aios; do
+  [[ -d "$d/.git" ]] || continue
+  D=$(git -C "$d" status --porcelain 2>/dev/null | wc -l)
+  A=$(git -C "$d" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)
+  printf '  %s %-22s изм=%s впереди=%s\n' "$([[ "$D" -eq 0 && "$A" -eq 0 ]] && echo ✅ || echo ⚠️)" "$(basename "$d")" "$D" "$A"
 done
-echo
-echo "GITHUB (JoTalbot/hermes)"
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-  gh repo view JoTalbot/hermes --json name,pushedAt,defaultBranchRef,isPrivate 2>/dev/null | sed 's/^/  /'
-  gh run list -R JoTalbot/hermes -L 3 2>/dev/null | sed 's/^/  /'
-else
-  echo "  gh unavailable/unauthenticated — falling back to git ls-remote"
-  git ls-remote --heads https://github.com/JoTalbot/hermes 2>/dev/null | head -3 | sed 's/^/  /'
-fi
-echo
-echo "SECRET SCAN (working tree)"
-if [ -x /opt/hermes/tests/secret-scan.sh ]; then
-  bash /opt/hermes/tests/secret-scan.sh --worktree 2>&1 | tail -5 | sed 's/^/  /'
-else
-  echo "  (secret-scan.sh not found at /opt/hermes/tests/secret-scan.sh)"
-fi
+
+ACTIONS=()
+[[ "$DIRT" -gt 0 ]] && ACTIONS+=("посмотреть изменения: git -C /opt/hermes diff --stat")
+[[ "$AHEAD" -gt 0 ]] && ACTIONS+=("отправить: git -C /opt/hermes push origin $BR")
+ACTIONS+=("подробно по всем репозиториям: напиши «репозитории»")
+report_footer "${ACTIONS[@]}"

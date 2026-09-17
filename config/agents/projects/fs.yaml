@@ -90,5 +90,6 @@ bus:
         PROJECT_PATH: "/opt/orchestrator/projects/fs"
         PROJECT_REPO: "https://github.com/JoTalbot/fs"
         PROJECT_SERVICE: "fstrim.service jo-agent-fs.service nfs-common.service"
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

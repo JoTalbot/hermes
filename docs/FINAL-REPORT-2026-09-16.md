@@ -51,8 +51,10 @@ issues". Every Hermes gate is `[OK]`: bus transport / token / bridge / stream, f
 | skills enabled | **12** |
 | bus channels | **9** |
 | monitoring alerts / dashboard panels | **8** / **12** |
+| agent handlers (from 31) | **128** |
+| check scripts, all in one report format | **24** |
 | doctor gates | **18** |
-| tests | **81** repo + **10** bus + **10** federation per peer |
+| tests | **82** repo + **27** agents selftest + **10** bus + **10** federation per peer |
 | backups | nightly 03:30 UTC, verified (sha256 + content) and rehearsed |
 
 ## Errors found and fixed while building
@@ -78,7 +80,9 @@ issues". Every Hermes gate is `[OK]`: bus transport / token / bridge / stream, f
 19. **A question about the team got "не понял задачу" and a dump of 30 capability tokens.** Every agent YAML already carried a Russian `purpose`; nothing rendered it for a human, the failure text spoke machine vocabulary, and there was nothing to tap. Added `agents/roster.py` (one renderer shared by the chat and the bus), `/agents` + `/projects`, meta-question recognition, a plain-language refusal with four examples, and a six-button keyboard where two buttons answer and two send real tasks.
 20. **The phone's button shortcut swallowed tasks** — the first keyboard accepted any text *containing* "статус" as `/status`, so `статус проекта hermes-os` returned node status instead of reaching the project agent. Labels are now matched exactly, never as substrings.
 21. **The test suite pinged the owner's phone** — `bus-selftest.sh` publishes to real channels (that is how it proves mirroring and priorities) and the bridge forwarded it. Test traffic is filtered by its `selftest` tag; the suite still exercises the live path.
-22. **Deploying generated config broke the node** — my helper copied `config/agents/*.yaml`, whose handler paths are generated *on the target*, from the working copy; 3 tests went red describing `/home/user/...`. `wire-agents.sh` regenerated them and the deploy script now refuses to ship `config/` at all.
+22. **Every agent answered with the same generic report.** «Что грузит сервер?» produced the host dump because routing knew four intents and always asked for `status`; and every report was a raw column dump — on a phone, that is not an answer. Fixed with `agents/routing.py` (deterministic sentence → capability + handler: top, disk, memory, docker, logs, ports, secrets, updates, alerts, targets, repos, pending) and one report format for all 24 check scripts (`agents/checks/lib/report.sh`) ending in a 💡 advice line. Capability grew from 31 handlers to **128**.
+23. **Agents had no model policy.** Models were picked by the gateway per request, with no relation to what the agent does. Now `config/models.yaml` + `agents/models.py` give every agent a tier — free/cheap by default, `hermes-reason` for analysis, `hermes-code` for diffs, `hermes-long` for long context, local Ollama as the degradation path — with each escalation logged and its cost visible. Measured: a real `ask` answers in ~1.1 s on a free tier.
+24. **Deploying generated config broke the node** — my helper copied `config/agents/*.yaml`, whose handler paths are generated *on the target*, from the working copy; 3 tests went red describing `/home/user/...`. `wire-agents.sh` regenerated them and the deploy script now refuses to ship `config/` at all.
 
 ## Remaining issues / honest limitations
 

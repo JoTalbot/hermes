@@ -88,5 +88,6 @@ bus:
         PROJECT_SLUG: "logistics-opt-orchestrator-projects-logistics"
         PROJECT_PATH: "/opt/orchestrator/projects/logistics"
         PROJECT_REPO: "https://github.com/JoTalbot/logistics"
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

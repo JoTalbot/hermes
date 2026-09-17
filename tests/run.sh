@@ -173,6 +173,12 @@ ck "free text is still a task" "free-text-is-task=True" "$CHAT_PROBE"
 ck "the phone keyboard offers six actions" "keyboard-buttons=6" "$CHAT_PROBE"
 ck "an unparsable task is refused in plain language, without a token dump" "refusal-friendly=True" "$CHAT_PROBE"
 ck "the refusal teaches by example" "refusal-has-examples=True" "$CHAT_PROBE"
+echo "[12] agents: capabilities, answer format and model policy"
+if bash tests/agents-selftest.sh >/tmp/agents-selftest.out 2>&1; then
+  ck "agents selftest" "PASS=" "$(grep -o 'PASS=[0-9]* FAIL=[0-9]*' /tmp/agents-selftest.out | tail -1)_$(echo ok)"
+else
+  ck "agents selftest" "FAIL=0" "$(grep -o 'PASS=[0-9]* FAIL=[0-9]*' /tmp/agents-selftest.out | tail -1)"
+fi
 echo
 echo "════ $PASS passed · $FAIL failed · $SKIP skipped ════"
 [[ $FAIL -eq 0 ]]

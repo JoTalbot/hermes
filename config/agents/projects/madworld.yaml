@@ -92,5 +92,6 @@ bus:
         PROJECT_REPO: "https://github.com/JoTalbot/MadWorld"
         PROJECT_SERVICE: "madworld-backup.service madworld-remote-operator-sync.service madworld-remote-operator.service"
         PROJECT_CONTAINERS: "madworld-api-1 madworld-postgres-1 madworld-world-tick-worker-1"
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

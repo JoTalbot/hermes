@@ -89,8 +89,12 @@ bus:
     status:
       run: bash /opt/hermes/agents/checks/github-status.sh
       timeout: 180
+    repos:
+      run: bash /opt/hermes/agents/checks/github-repos.sh
+      timeout: 180
     secret-scan:
       run: bash /opt/hermes/scripts/secret-scan.sh --worktree
       timeout: 180
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

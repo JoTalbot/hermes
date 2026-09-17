@@ -343,3 +343,48 @@ channel is read by nobody, which is the incident of 2026-09-17.
 Safety properties, enforced in code: only chats persisted by `discover` may command the node
 (anything else is logged and ignored), the command set is a fixed dispatch table, and owner
 text is never interpolated into a shell — free text is only ever *published*.`doctor` gate 18 fails if a chat is configured but nothing polls it.
+
+## What the agents can actually do (2026-09-17)
+
+The question "Что грузит сервер?" used to return the generic host report. Now a sentence is
+routed to the handler that answers it (`agents/routing.py`, deterministic, no model):
+
+| you write | capability | handler | answer |
+|---|---|---|---|
+| что грузит сервер / тормозит | host-health | `top` | топ-процессы за секунду, load, swap, кто из кого состоит |
+| сколько места на диске | host-health | `disk` | тома, inodes, крупные каталоги, docker |
+| память / swap | host-health | `memory` | RAM/swap, топ по памяти, группы |
+| контейнеры | host-health | `docker` | запущено/остановлено/unhealthy, место |
+| логи / ошибки | host-health | `logs` | падавшие юниты, топ источников, последние 5 |
+| сервисы / юниты | host-health | `services` | упавшие, самые перезапускаемые, таймеры |
+| кто слушает порты | security | `ports` | что наружу, что локально, ufw |
+| секреты / права | security | `secrets` | права 0600, поиск открытых, скан git |
+| обновления | security | `updates` | пакеты, индекс apt, нужна ли перезагрузка |
+| алерты | monitoring | `alerts` | что горит, правила, цели |
+| цели prometheus | monitoring | `targets` | up/down по заданиям с ошибками |
+| бэкап / целостность | backup | `status`, `list`, `verify` | свежесть, состав, gzip-проверка |
+| github / репозитории | github | `status`, `repos`, `secret-scan` | ветки, изменения, сканер |
+| что в работе | orchestration | `pending` | шина, узлы, зависшие задачи |
+| **почему / проанализируй / рекомендации** | тот же домен | **`ask`** | агент собирает факты своим обработчиком и просит модель объяснить их |
+
+Every report uses one format (`agents/checks/lib/report.sh`): a header with a date, sections
+with emoji, ✅/⚠️/🔴 verdicts, and a final **💡 ЧТО ДЕЛАТЬ**. A report without advice is a
+bug — `tests/agents-selftest.sh` fails on it.
+
+## Models: cheap by default, smart where it matters
+
+Agents never hold provider keys: they name a **tier**, the LLM Balancer picks the provider
+(`config/models.yaml`, policy in `agents/models.py`).
+
+| tier | providers behind it | used for |
+|---|---|---|
+| `hermes-fast` | groq-gpt-oss-20b, groq-qwen3.8-27b, cerebras-llama3.3-70b | routine work: statuses, triage, diagnosis |
+| `hermes-reason` | groq-gpt-oss-120b | analysis, planning, risk (orchestrator, security, «почему…») |
+| `hermes-code` | mistral-small, hf-Qwen2.5-72B | diffs, review, refactors (github) |
+| `hermes-long` | gemini-2.5-flash | summaries over journals and many files |
+| `hermes-local` | ollama qwen2.5:1.5b / llama3.2:3b (on this box) | degradation when the balancer is down |
+
+Escalation is a decision, not a default: every use is logged with the model alias and the
+reason (`journalctl -u hermes-agents | grep ask:`), so cost drift is visible. When the
+balancer is unreachable the agent answers with the measured facts and says plainly that the
+model was unavailable — a question never fails because a model did.

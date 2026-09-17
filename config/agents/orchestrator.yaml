@@ -84,8 +84,14 @@ bus:
     status:
       run: bash /opt/hermes/agents/checks/orchestrator-status.sh
       timeout: 180
+    pending:
+      run: bash /opt/hermes/agents/checks/orchestrator-pending.sh
+      timeout: 180
+    skills:
+      run: bash /opt/hermes/agents/checks/orchestrator-skills.sh
+      timeout: 180
     dispatch: {}          # runtime built-in
     agents: {}          # runtime built-in
-    skills: {}          # runtime built-in
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

@@ -38,8 +38,14 @@ runtime.agents = R.load_agents()
 
 
 def cap_for(task: str) -> str:
-    cap, target, _ = runtime.route_by_text(task)
-    return cap or (target and f"agent:{target}") or "(none)"
+    """Capability (or named agent) the router picks for a sentence."""
+    d = runtime.route(task)
+    return d["capability"] or (d["target"] and f"agent:{d['target']}") or "(none)"
+
+
+def handler_for(task: str) -> str:
+    """The handler the route asks for — this is what makes an answer specific."""
+    return runtime.route(task)["handler"]
 
 
 print("agents=%d" % len(runtime.agents))
@@ -47,6 +53,12 @@ print("route-host=%s" % cap_for("проверить загрузку серве�
 print("route-project=%s" % cap_for("статус проекта logistics"))
 print("route-alias=%s" % cap_for("логистика статус"))
 print("route-unknown=%s" % cap_for("приготовить кофе"))
+print("handler-top=%s" % handler_for("Что грузит сервер?"))
+print("handler-disk=%s" % handler_for("сколько места на диске"))
+print("handler-alerts=%s" % handler_for("покажи алерты"))
+print("handler-ports=%s" % handler_for("кто слушает порты"))
+print("handler-analysis=%s" % handler_for("почему сервер тормозит"))
+print("handler-team=%s" % handler_for("какие агенты есть"))
 
 print("escape=%s" % B.esc("<b>x</b> & y"))
 

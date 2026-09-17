@@ -87,5 +87,15 @@ bus:
     audit:
       run: bash /opt/hermes/agents/checks/security-audit.sh
       timeout: 180
+    ports:
+      run: bash /opt/hermes/agents/checks/security-ports.sh
+      timeout: 180
+    secrets:
+      run: bash /opt/hermes/agents/checks/security-secrets.sh
+      timeout: 180
+    updates:
+      run: bash /opt/hermes/agents/checks/security-updates.sh
+      timeout: 180
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

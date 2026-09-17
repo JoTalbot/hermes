@@ -83,5 +83,12 @@ bus:
     health:
       run: bash /opt/hermes/agents/checks/monitoring-health.sh
       timeout: 180
+    alerts:
+      run: bash /opt/hermes/agents/checks/monitoring-alerts.sh
+      timeout: 180
+    targets:
+      run: bash /opt/hermes/agents/checks/monitoring-targets.sh
+      timeout: 180
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

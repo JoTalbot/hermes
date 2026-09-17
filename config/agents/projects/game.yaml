@@ -90,5 +90,6 @@ bus:
         PROJECT_PATH: "/opt/orchestrator/projects/game"
         PROJECT_REPO: "https://github.com/JoTalbot/game"
         PROJECT_SERVICE: "jo-agent-game.service"
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

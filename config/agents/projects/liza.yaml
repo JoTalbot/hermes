@@ -87,5 +87,6 @@ bus:
         PROJECT_SLUG: "liza"
         PROJECT_PATH: "/home/ubuntu/liza"
         PROJECT_REPO: "https://github.com/JoTalbot/liza"
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

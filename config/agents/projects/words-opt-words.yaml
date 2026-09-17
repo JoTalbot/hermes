@@ -87,5 +87,6 @@ bus:
         PROJECT_SLUG: "words-opt-words"
         PROJECT_PATH: "/opt/words"
         PROJECT_REPO: "https://github.com/JoTalbot/words"
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

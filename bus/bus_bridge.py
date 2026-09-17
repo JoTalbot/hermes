@@ -102,6 +102,17 @@ BUTTON_META = {"агенты": "agents", "проекты": "projects", "стат
 
 def esc(text: str) -> str:
     return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def prettify(escaped: str) -> str:
+    """Markdown leftovers → HTML, applied strictly AFTER escaping.
+
+    A model sometimes answers with **bold** or `code` even when told not to; on the phone
+    that reads as literal asterisks. Only the two patterns that actually appear are
+    converted, and nothing here can inject a tag (the input is already escaped).
+    """
+    out = re.sub(r"\*\*([^*\n]{1,120})\*\*", r"<b>\1</b>", escaped)
+    return re.sub(r"`([^`\n]{1,80})`", r"<code>\1</code>", out)
 TG_ENV = "/etc/hermes/telegram.env"
 TG_CHATS = "/etc/hermes/telegram.chats.json"
 STREAM = "AGENT_BUS"
@@ -304,11 +315,15 @@ def tg_line(env: dict) -> str:
     body = (env.get("text") or "").strip()
     if len(body) > 1200:
         body = body[:1200] + "…"
-    # Agent output is usually a shell report: monospace keeps its columns readable.
-    if body.count("\n") >= 1 or kind in ("result", "error", "status"):
+    # Two shapes of answer, two presentations:
+    #  * a measurement report (check scripts) is column-formatted → monospace;
+    #  * a model's explanation is prose with bullets and a "💡" conclusion → HTML text, so
+    #    it stays readable on a phone instead of being a wall of fixed-width text.
+    prose = "💡" in body or "•" in body
+    if (body.count("\n") >= 1 or kind in ("result", "error", "status")) and not prose:
         shown = f"<pre>{esc(body[:900])}</pre>"
     else:
-        shown = esc(body)
+        shown = prettify(esc(body[:1200]))
     lines = [f"{mark}{icon} <b>{title}</b> · {esc(where)}",
              f"👤 {esc(env.get('from') or '?')} @ {esc(env.get('server') or '?')}",
              "",

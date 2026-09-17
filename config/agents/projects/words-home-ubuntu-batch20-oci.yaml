@@ -88,5 +88,6 @@ bus:
         PROJECT_SLUG: "words-home-ubuntu-batch20-oci"
         PROJECT_PATH: "/home/ubuntu/batch20-oci"
         PROJECT_REPO: "https://github.com/JoTalbot/words"
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

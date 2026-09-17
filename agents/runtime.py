@@ -55,6 +55,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bus"))
 import roster  # noqa: E402  (same directory: one renderer for chat and bus)
+import routing  # noqa: E402  (deterministic intent -> handler table)
+import models   # noqa: E402  (model policy: which tier each agent uses)
 from bus import (CHANNELS, RPC_PREFIX, SUBJECT_PREFIX, envelope, mirror_local,  # noqa: E402
                  nats_conf, server_id)
 
@@ -324,6 +326,9 @@ def builtin(agent: Agent, handler: str, args: dict) -> dict | None:
             "agent_id": agent.id, "kind": agent.kind, "purpose": agent.description,
             "capabilities": agent.capabilities, "handlers": agent.handler_names(),
             "config": str(agent.path), "node": server_id()}, ensure_ascii=False, indent=1)}
+    if handler in ("pending", "in-flight"):
+        return {"ok": True, "text": "см. status: незавершённые задачи в /var/lib/hermes-agents/"
+                                     "pending.json (runtime: orchestrator-pending.sh)"}
     if handler == "agents":
         ags = load_agents()
         rows = [{"id": a.id, "kind": a.kind, "capabilities": a.capabilities,
@@ -413,6 +418,24 @@ class Runtime:
         # `dispatch` is orchestration, not a shell handler: it routes to another agent
         # and returns immediately (the answer arrives later as a result message).
         handler_name, args = self.parse_request(env)
+        # `ask` = deterministic facts first, then the agent's model explains them. The facts
+        # come from the agent's own check script, so the model reasons over measurements
+        # instead of inventing numbers.
+        if handler_name == "ask":
+            res = await self.answer_with_model(agent, env, args)
+            took = round(time.time() - started, 2)
+            body = res["text"]
+            if channel:
+                await self.publish(nc, channel=channel, kind="result",
+                                   text=f"{body}\n\n🧠 {res.get('meta_line', '')} ({took}s)",
+                                   correlation=env.get("correlation_id"), agent=agent.id,
+                                   refs=res.get("refs") or [])
+            else:
+                await self.publish(nc, channel=None, to=who, kind="result",
+                                   text=f"{body}\n\n🧠 {res.get('meta_line', '')} ({took}s)",
+                                   correlation=env.get("correlation_id"), agent=agent.id,
+                                   refs=res.get("refs") or [])
+            return
         if agent.id == "orchestrator" and handler_name in ("dispatch", "route", "task"):
             await self.dispatch(nc, agent, {**env, "args": args}, channel)
             return
@@ -446,9 +469,11 @@ class Runtime:
     async def publish(self, nc, *, channel: str | None, kind: str, text: str,
                       to: str | None = None, correlation: str | None = None,
                       refs: list | None = None, agent: str = "orchestrator",
-                      priority: str = "normal") -> dict:
+                      priority: str = "normal", args: dict | None = None) -> dict:
         env = envelope(channel=channel, to=to, kind=kind, text=text, priority=priority,
                        correlation=correlation, refs=refs or [], agent=agent)
+        if args:
+            env["args"] = args
         subject = (f"{SUBJECT_PREFIX}.dm.{to}.{priority}" if to
                    else f"{SUBJECT_PREFIX}.chat.{channel}.{priority}")
         await nc.publish(subject, json.dumps(env, ensure_ascii=False).encode())
@@ -456,50 +481,39 @@ class Runtime:
         await asyncio.to_thread(mirror_local, env)
         return env
 
-    # -- orchestrator built-ins ---------------------------------------------
-    def route_by_text(self, task: str) -> tuple[str, str, str]:
-        """Pick a target for a free-text task. Deterministic, no model, no tokens.
+    # -- model-assisted answers ---------------------------------------------
+    async def answer_with_model(self, agent: Agent, env: dict, args: dict) -> dict:
+        """Gather facts with the agent's own handler, then ask its model to explain them."""
+        task = (env.get("text") or "").strip()
+        for prefix in ("ask ",):
+            if task.lower().startswith(prefix):
+                task = task[len(prefix):].strip()
+        facts_handler = routing.pick_handler(agent, args.get("facts_handler") or "status")
+        async with self.sem:
+            facts = await asyncio.to_thread(run_handler, agent, facts_handler, {},
+                                            env.get("from") or "unknown")
+        fact_text = facts.get("text") or "(нет данных)"
+        analysis = bool(env.get("args", {}).get("analysis")) or True
+        model, why = models.model_for(agent.id, task, analysis=analysis)
+        text, meta = await asyncio.to_thread(
+            models.ask, task, fact_text, agent.id, agent.description, str(server_id()), model)
+        meta_line = (f"модель {meta.get('model')} ({why}) · "
+                     f"{meta.get('latency_ms', 0)} мс")
+        if not text:
+            # Never fail the task: give the measurements and say plainly that the model is out.
+            note = (f"⚠️ Модель недоступна ({meta.get('fallback') or 'нет ответа'}), "
+                    f"поэтому просто факты:\n\n{fact_text}")
+            return {"ok": True, "handler": "ask", "text": note, "code": 0,
+                    "refs": facts.get("refs") or [], "meta_line": meta_line}
+        log(f"ask: {agent.id} model={meta.get('model')} ({why}) "
+            f"{meta.get('latency_ms', 0)}ms facts={facts_handler}")
+        return {"ok": True, "handler": "ask", "text": text, "code": 0,
+                "refs": facts.get("refs") or [], "meta_line": meta_line}
 
-        A human writing in the chat ("проверить загрузку сервера") cannot be expected to
-        know capability names. Before this, a task without an explicit capability fell
-        through to "first agent alphabetically" — i.e. `backup` got asked about disk load.
-        The order below is deliberate: a project named in the task is the most specific
-        signal, then the more specific intents, and only then the generic host keywords.
-        Returns (capability, target_agent_id, human-readable reason).
-        """
-        low = (task or "").lower()
-        caps = {c for a in self.agents.values() for c in a.capabilities}
-        # 1. a project named in the task is the strongest signal (longest name first, so
-        #    "words-home-ubuntu-batch19-oci" wins over "words")
-        projects = sorted(((c, c.split(":", 1)[1]) for c in caps
-                           if c.startswith("project:")), key=lambda p: -len(p[1]))
-        # Pass 1: the project's exact name appears in the task. Longest wins, so
-        # "words-home-ubuntu-batch20-oci" is only chosen when written out in full.
-        for cap, name in projects:
-            if re.search(rf"\b{re.escape(name.lower())}\b", low):
-                return cap, "", f"проект «{name}»"
-        # Pass 2: a pointer to the project, not its full name: prefer the SHORTEST project
-        # ("words" over "words-home-ubuntu-batch20-oci") — a human naming a project means
-        # the base one, not a worktree variant.
-        for alias, target in PROJECT_ALIASES.items():
-            if alias in low:
-                hit = [n for _, n in projects if n.lower().startswith(target)]
-                if hit:
-                    return f"project:{min(hit, key=len)}", "", f"проект «{min(hit, key=len)}» (синоним)"
-        for cap, name in sorted(((c, c.split(":", 1)[1]) for c in caps
-                                 if c.startswith("project:")), key=lambda p: len(p[1])):
-            stem = name.split("-")[0]
-            if len(stem) > 4 and stem.lower() in low:
-                return cap, "", f"проект «{name}»"
-        # 2. intent keywords, specific before generic
-        for rx, cap, label in INTENT_RULES:
-            if re.search(rx, low) and cap in caps:
-                return cap, "", label
-        # 3. the task may simply name the agent
-        for tok in re.findall(r"[a-z0-9][a-z0-9\-]{2,}", low):
-            if tok in self.agents and tok != "orchestrator":
-                return "", tok, f"агент «{tok}»"
-        return "", "", ""
+    # -- orchestrator built-ins ---------------------------------------------
+    def route(self, task: str) -> dict:
+        """Ask routing.py what this sentence means: (capability, handler, why, analysis)."""
+        return routing.route(task, self.agents)
 
     async def dispatch(self, nc, agent: Agent, env: dict, channel: str | None) -> None:
         """Route a task to the best-suited agent by capability, then track the reply."""
@@ -514,19 +528,27 @@ class Runtime:
         target = args.get("agent") or ""
         why = ""
         # "какие агенты есть и их функции" is a question ABOUT the system, not a task for a
-        # specialist. Answering it with "не понял задачу" (and a dump of 30 capability
-        # tokens) is what the owner saw; the answer was on disk the whole time.
+        # specialist. routing.route() marks it (target=orchestrator, handler=agents) and it
+        # is answered here from the same registry the chat uses — so the chat and the bus
+        # can never disagree about who is on the team.
         low_task = task.lower()
-        if re.search(roster.META_AGENTS, low_task):
+        if re.search(routing.META_AGENTS, low_task):
             await self.publish(nc, channel=channel or "orchestrator", kind="result",
                                text=roster.overview(), correlation=env.get("id"), agent=agent.id)
             return
-        if re.search(roster.META_PROJECTS, low_task):
+        if re.search(routing.META_PROJECTS, low_task):
             await self.publish(nc, channel=channel or "orchestrator", kind="result",
                                text=roster.projects(), correlation=env.get("id"), agent=agent.id)
             return
+        handler_hint = args.get("handler") or ""
+        analysis = False
         if not target and not capability:
-            capability, target, why = self.route_by_text(task)
+            decision = self.route(task)
+            capability = decision["capability"]
+            target = decision["target"]
+            why = decision["why"]
+            handler_hint = handler_hint or decision["handler"]
+            analysis = decision["analysis"]
             if not capability and not target:
                 await self.publish(nc, channel="orchestrator", kind="error",
                                    text=(f"🤔 Не понял: «{task[:120]}»\n\n"
@@ -559,16 +581,28 @@ class Runtime:
         if why:
             log(f"routed by text: «{task[:60]}» → {capability or target} ({why})")
         corr = env.get("correlation_id") or uuid.uuid4().hex[:12]
-        handler = args.get("handler") or "status"
+        # The route names the handler ("что грузит" -> top). Fall back to the agent's status
+        # only when it does not declare the one we picked.
+        handler = routing.pick_handler(self.agents[target], handler_hint or "status")
+        if handler_hint and handler != handler_hint:
+            log(f"handler {handler_hint!r} not declared by {target}; using {handler!r}")
         self.remember(corr, {"task": task, "agent": target, "handler": handler,
                              "dispatcher": agent.id, "channel": channel or "orchestrator",
+                             "analysis": analysis,
                              "at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
         await self.publish(nc, channel=channel or "orchestrator", kind="task",
                            text=f"задача → {target}: {task} (handler={handler}, corr={corr})",
                            correlation=corr, agent=agent.id)
+        # The target needs the ask in its own words: for `ask` we also pass the fact handler
+        # that produced the numbers, so the model explains measurements instead of guessing.
+        facts_with = "status"
+        if handler == "ask":
+            facts_with = (routing.route(task, self.agents).get("facts_handler") or "status")
         await self.publish(nc, channel=None, to=target, kind="task",
-                           text=f"{handler} {task}", correlation=corr, agent=agent.id)
-        log(f"dispatched corr={corr} → {target}.{handler}")
+                           text=f"{handler} {task}", correlation=corr, agent=agent.id,
+                           args={"handler": handler, "facts_handler": facts_with})
+        log(f"dispatched corr={corr} → {target}.{handler} ({why or 'explicit'})"
+            f"{' + анализ' if analysis else ''}")
 
     async def on_channel(self, nc, agent: Agent, env: dict) -> None:
         text = env.get("text") or ""

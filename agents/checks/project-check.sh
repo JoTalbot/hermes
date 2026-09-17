@@ -1,55 +1,65 @@
 #!/usr/bin/env bash
-# Generic per-project check. Everything comes from the project's own agent YAML via env:
-#   PROJECT_PATH PROJECT_REPO PROJECT_SERVICE PROJECT_CONTAINERS PROJECT_HEALTH_URL
-# Report facts only; never modify the project.
-set -uo pipefail
-P="${PROJECT_PATH:-}"
-echo "PROJECT ${PROJECT_SLUG:-?}  path=$P  node=$(hostname)"
-if [ -n "$P" ] && [ -d "$P" ]; then
-  if [ -d "$P/.git" ]; then
-    cd "$P" || true
-    printf "  git: branch=%s head=%s dirty=%s last=%s\n" \
-      "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" "$(git rev-parse --short HEAD 2>/dev/null)" \
-      "$(git status --porcelain 2>/dev/null | wc -l)" "$(git log -1 --format=%cd --date=short 2>/dev/null)"
-    printf "  remote: %s\n" "$(git remote get-url origin 2>/dev/null)"
-  else
-    echo "  no .git in $P"
+# Статус проекта: путь, git, сервисы, контейнеры, свежие изменения. Read-only.
+# Переменные приходят из YAML агента: PROJECT_SLUG, PROJECT_PATH, PROJECT_REPO, PROJECT_SERVICE.
+source "$(dirname "${BASH_SOURCE[0]}")/lib/report.sh"
+SLUG="${PROJECT_SLUG:-project}"
+PATH_="${PROJECT_PATH:-}"
+SERVICES="${PROJECT_SERVICE:-}"
+report_header "📦 ПРОЕКТ ${SLUG}"
+
+if [[ -z "$PATH_" || ! -d "$PATH_" ]]; then
+  report_section "📁 КАТАЛОГ"
+  report_bad "не найден: ${PATH_:-путь не задан}"
+  report_info "репозиторий: ${PROJECT_REPO:-неизвестен}"
+  report_footer "каталог отсутствует — это отметка, а не ошибка агента: решить, восстанавливать ли проект" \
+                "если проект переехал: обновить PROJECT_PATH в config/agents/projects/${SLUG}.yaml и запустить scripts/wire-agents.sh"
+  exit 0
+fi
+
+report_section "📁 КАТАЛОГ"
+report_ok "$PATH_"
+report_kv "размер" "$(du -sh "$PATH_" 2>/dev/null | cut -f1)"
+report_kv "репозиторий" "${PROJECT_REPO:-—}"
+
+if [[ -d "$PATH_/.git" ]]; then
+  report_section "🐙 GIT"
+  BR=$(git -C "$PATH_" rev-parse --abbrev-ref HEAD 2>/dev/null)
+  DIRT=$(git -C "$PATH_" status --porcelain 2>/dev/null | wc -l)
+  AHEAD=$(git -C "$PATH_" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)
+  BEHIND=$(git -C "$PATH_" rev-list --count 'HEAD..@{u}' 2>/dev/null || echo 0)
+  report_kv "ветка" "$BR"
+  [[ "$DIRT" -eq 0 ]] && report_ok "дерево чистое" || report_warn "изменений: $DIRT"
+  [[ "$AHEAD" -eq 0 ]] && report_ok "всё отправлено" || report_warn "не отправлено: $AHEAD"
+  [[ "$BEHIND" -eq 0 ]] && report_ok "не отстаёт" || report_warn "отстаёт на $BEHIND коммитов"
+  report_section "🕐 ПОСЛЕДНИЕ КОММИТЫ"
+  git -C "$PATH_" log -3 --format='  %h %ad %s' --date=short 2>/dev/null | cut -c1-96
+else
+  report_section "🐙 GIT"; report_warn "это не git-дерево"
+fi
+
+if [[ -n "$SERVICES" ]]; then
+  report_section "⚙️ СЕРВИСЫ ПРОЕКТА"
+  for s in $SERVICES; do
+    ST=$(systemctl is-active "$s" 2>/dev/null)
+    case "$ST" in active) printf '  ✅ %s\n' "$s" ;; *) printf '  🔴 %s (%s)\n' "$s" "${ST:-нет}" ;; esac
+  done
+fi
+
+UNITS=$(systemctl list-units --all --plain --no-legend 2>/dev/null | awk '{print $1}' | grep -i "$SLUG" | head -6)
+[[ -n "$UNITS" ]] && { report_section "🧩 ЮНИТЫ ПО ИМЕНИ"; echo "$UNITS" | sed 's/^/  /'; }
+
+if command -v docker >/dev/null; then
+  CONT=$(docker ps -a --format '{{.Names}}|{{.Status}}' 2>/dev/null | grep -i "$SLUG" | head -8)
+  if [[ -n "$CONT" ]]; then
+    report_section "🐳 КОНТЕЙНЕРЫ"
+    echo "$CONT" | while IFS='|' read -r n s; do
+      case "$s" in Up*) printf '  ✅ %-34s %s\n' "$n" "$s" ;; *) printf '  ⛔ %-34s %s\n' "$n" "$s" ;; esac
+    done
   fi
-  echo "  size: $(du -sh "$P" 2>/dev/null | cut -f1)  files: $(find "$P" -type f 2>/dev/null | wc -l)"
-  for f in README.md package.json requirements.txt pyproject.toml docker-compose.yml Makefile; do
-    [ -e "$P/$f" ] && echo "  marker: $f"
-  done
-else
-  echo "  path missing or unset (${P:-unset})"
 fi
-echo
-echo "SERVICE"
-if [ -n "${PROJECT_SERVICE:-}" ]; then
-  for u in ${PROJECT_SERVICE}; do printf "  %-30s %s\n" "$u" "$(systemctl is-active "$u" 2>/dev/null)"; done
-else
-  echo "  (no service declared)"
-fi
-echo
-echo "CONTAINERS"
-if [ -n "${PROJECT_CONTAINERS:-}" ]; then
-  for c in ${PROJECT_CONTAINERS}; do
-    st=$(docker ps -a --filter "name=^/${c}$" --format '{{.Status}}' 2>/dev/null | head -1)
-    printf "  %-30s %s\n" "$c" "${st:-not found}"
-  done
-else
-  echo "  (none declared)"
-fi
-echo
-echo "HEALTH"
-if [ -n "${PROJECT_HEALTH_URL:-}" ]; then
-  for u in ${PROJECT_HEALTH_URL}; do
-    printf "  %-40s HTTP %s\n" "$u" "$(curl -s -m 6 -o /dev/null -w '%{http_code}' "$u")"
-  done
-else
-  echo "  (no health url declared)"
-fi
-echo
-echo "PORTS BOUND BY THIS PROJECT (best effort)"
-if [ -n "$P" ]; then
-  docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -i "$(basename "$P")" | sed 's/^/  /' || echo "  (no matching container)"
-fi
+
+ACTIONS=()
+[[ "${DIRT:-0}" -gt 0 ]] && ACTIONS+=("в проекте есть незакоммиченные изменения — посмотреть diff перед любыми действиями")
+[[ "${BEHIND:-0}" -gt 0 ]] && ACTIONS+=("проект отстаёт на ${BEHIND} коммитов — обновление согласовать с владельцем проекта")
+ACTIONS+=("спросить агента по смыслу: «почему проект ${SLUG} тормозит» (ответит модель по фактам)")
+report_footer "${ACTIONS[@]}"

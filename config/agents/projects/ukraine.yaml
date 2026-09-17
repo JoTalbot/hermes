@@ -90,5 +90,6 @@ bus:
         PROJECT_PATH: "/opt/orchestrator/projects/ukraine"
         PROJECT_REPO: "https://github.com/JoTalbot/ukraine"
         PROJECT_SERVICE: "jo-agent-ukraine.service"
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

@@ -1,32 +1,32 @@
 #!/usr/bin/env bash
-# Backup freshness + integrity. `ARGS_JSON={"deep":"1"}` triggers a real verify run.
-set -uo pipefail
+# Бэкапы: свежесть, размер, расписание, проверка целостности. Read-only.
+source "$(dirname "${BASH_SOURCE[0]}")/lib/report.sh"
+report_header "💾 БЭКАПЫ"
+
 DIR=/var/backups/hermes
-echo "BACKUP DIR $DIR"
-ls -lht "$DIR" 2>/dev/null | head -6 | sed 's/^/  /'
-LATEST=$(ls -t "$DIR"/hermes-state-*.tar.gz 2>/dev/null | head -1)
-if [ -z "$LATEST" ]; then echo "  NO BACKUP FOUND"; exit 1; fi
-AGE_H=$(( ( $(date +%s) - $(stat -c %Y "$LATEST") ) / 3600 ))
-echo "  latest: $(basename "$LATEST")  age=${AGE_H}h  size=$(du -h "$LATEST" | cut -f1)"
-SLA=30
-if [ "$AGE_H" -le "$SLA" ]; then echo "  freshness: OK (SLA ${SLA}h)"; else echo "  freshness: VIOLATION (SLA ${SLA}h)"; fi
-echo
-echo "TIMER"
-systemctl list-timers hermes-backup.timer --no-legend --plain 2>/dev/null | awk '{print "  next: "$1" "$2"  last: "$3" "$4}' 
-echo
-echo "INTEGRITY"
-if [ -f "$DIR/$(basename "$LATEST").sha256" ] || [ -f "$DIR/last.sha256" ]; then
-  sha256sum -c "$DIR/$(basename "$LATEST").sha256" 2>/dev/null | sed 's/^/  /' || \
-    (cd "$DIR" && grep "$(basename "$LATEST")" last.sha256 | sha256sum -c - 2>/dev/null | sed 's/^/  /')
-else
-  echo "  no sidecar checksum; computing archive test"
-  tar tzf "$LATEST" >/dev/null 2>&1 && echo "  archive readable, $(tar tzf "$LATEST" 2>/dev/null | wc -l) entries"
-fi
-if [ "${ARGS_JSON:-}" != "" ] && echo "${ARGS_JSON}" | grep -q '"deep"'; then
-  echo
-  echo "DEEP VERIFY (restore into a scratch dir)"
-  bash /opt/hermes/scripts/verify-backup.sh "$LATEST" 2>&1 | tail -12 | sed 's/^/  /'
-fi
-echo
-echo "DISK HEADROOM"
-df -h /var | awk 'NR==2{print "  /var: "$3" used, "$4" free ("$5")"}'
+report_section "📦 АРХИВЫ"
+if [[ -d "$DIR" ]]; then
+  N=$(ls -1 "$DIR" 2>/dev/null | wc -l)
+  report_kv "всего" "$N"
+  ls -1t "$DIR"/*.tar.gz "$DIR"/*.tgz 2>/dev/null | head -4 | while read -r f; do
+    printf '  📄 %-34s %6s  %s\n' "$(basename "$f")" "$(du -h "$f" | cut -f1)" "$(date -r "$f" -u '+%m-%d %H:%M')"
+  done
+  NEW=$(ls -1t "$DIR"/*.tar.gz "$DIR"/*.tgz 2>/dev/null | head -1)
+  if [[ -n "$NEW" ]]; then
+    AGE=$(( ( $(date +%s) - $(stat -c %Y "$NEW") ) / 3600 ))
+    report_section "📊 СВЕЖЕСТЬ"
+    report_kv "возраст последнего" "${AGE} ч"
+    [[ "$AGE" -le 30 ]] && report_ok "суточный график соблюдается" || report_warn "старше суток — проверить таймер"
+  else report_warn "архивов нет"; fi
+else report_bad "каталога $DIR нет"; fi
+
+report_section "🗓 РАСПИСАНИЕ"
+systemctl list-timers hermes-backup.timer --no-pager 2>/dev/null | sed -n '2p' | sed 's/^/  /'
+report_kv "служба" "$(systemctl is-active hermes-backup.service 2>/dev/null)"
+
+report_section "✅ ПРОВЕРКА ПОСЛЕДНЕГО"
+bash "$(dirname "${BASH_SOURCE[0]}")/backup-verify.sh" 2>/dev/null | tail -4 | sed 's/^/  /'
+
+ACTIONS=("проверка выборочного восстановления: bash scripts/restore.sh <архив> --force (в контейнере)")
+ACTIONS+=("сделать бэкап сейчас: systemctl start hermes-backup.service")
+report_footer "${ACTIONS[@]}"

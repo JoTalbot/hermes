@@ -90,5 +90,6 @@ bus:
         PROJECT_PATH: "/home/ubuntu/batch18-oci"
         PROJECT_REPO: "https://github.com/JoTalbot/words"
         PROJECT_SERVICE: "words-tunnel.service"
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

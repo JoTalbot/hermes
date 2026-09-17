@@ -88,5 +88,6 @@ bus:
         PROJECT_SLUG: "hermes-os"
         PROJECT_PATH: "/opt/hermes"
         PROJECT_REPO: "https://github.com/JoTalbot/hermes"
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

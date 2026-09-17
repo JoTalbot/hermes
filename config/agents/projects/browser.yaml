@@ -91,5 +91,6 @@ bus:
         PROJECT_PATH: "/opt/octopus-browser"
         PROJECT_REPO: "https://github.com/JoTalbot/browser"
         PROJECT_SERVICE: "octopus-browser-aios-adapter.service octopus-browser.service"
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

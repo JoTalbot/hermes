@@ -98,11 +98,27 @@ bus:
     status:
       run: bash /opt/hermes/agents/checks/guardian-status.sh
       timeout: 180
+    top:
+      run: bash /opt/hermes/agents/checks/guardian-top.sh
+      timeout: 180
+    disk:
+      run: bash /opt/hermes/agents/checks/guardian-disk.sh
+      timeout: 180
+    memory:
+      run: bash /opt/hermes/agents/checks/guardian-memory.sh
+      timeout: 180
+    docker:
+      run: bash /opt/hermes/agents/checks/guardian-docker.sh
+      timeout: 180
+    logs:
+      run: bash /opt/hermes/agents/checks/guardian-logs.sh
+      timeout: 180
     services:
       run: bash /opt/hermes/agents/checks/guardian-services.sh
       timeout: 180
     hermes:
       run: bash /opt/hermes/agents/checks/hermes-status.sh
       timeout: 180
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

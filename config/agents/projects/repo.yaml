@@ -90,5 +90,6 @@ bus:
         PROJECT_PATH: "/root/agents/-Octopus/repo"
         PROJECT_REPO: "https://github.com/JoTalbot/repo"
         PROJECT_SERVICE: "apport-autoreport.service octopus-tg-registry-report.service"
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

@@ -88,8 +88,12 @@ bus:
     status:
       run: bash /opt/hermes/agents/checks/backup-status.sh
       timeout: 180
+    list:
+      run: bash /opt/hermes/agents/checks/backup-list.sh
+      timeout: 180
     verify:
       run: bash /opt/hermes/agents/checks/backup-verify.sh
       timeout: 180
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

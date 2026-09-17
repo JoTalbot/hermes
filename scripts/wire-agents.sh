@@ -60,41 +60,55 @@ CORE = {
                 "возможностям, отслеживает correlation_id и собирает результат.",
         capabilities=["orchestration", "routing", "coordination", "planning"],
         handlers={"status": f"bash {CHECKS}/orchestrator-status.sh",
-                  "dispatch": None, "agents": None, "skills": None,
+                  "pending": f"bash {CHECKS}/orchestrator-pending.sh",
+                  "skills": f"bash {CHECKS}/orchestrator-skills.sh",
+                  "dispatch": None, "agents": None, "ask": None,
                   "identity": None, "ping": None}),
     "server-guardian": dict(
         purpose="Здоровье узла: systemd, docker, диск, память, загрузка, журнал ошибок.",
         capabilities=["host-health", "services", "docker", "disk", "load", "journal"],
         handlers={"status": f"bash {CHECKS}/guardian-status.sh",
+                  "top": f"bash {CHECKS}/guardian-top.sh",
+                  "disk": f"bash {CHECKS}/guardian-disk.sh",
+                  "memory": f"bash {CHECKS}/guardian-memory.sh",
+                  "docker": f"bash {CHECKS}/guardian-docker.sh",
+                  "logs": f"bash {CHECKS}/guardian-logs.sh",
                   "services": f"bash {CHECKS}/guardian-services.sh",
                   "hermes": f"bash {CHECKS}/hermes-status.sh",
-                  "identity": None, "ping": None}),
+                  "ask": None, "identity": None, "ping": None}),
     "github": dict(
         purpose="GitHub как источник истины: состояние репозиториев, CI, коммиты, "
                 "отсутствие секретов в истории.",
         capabilities=["git", "github", "ci", "repo-state", "commit", "push"],
         handlers={"status": f"bash {CHECKS}/github-status.sh",
+                  "repos": f"bash {CHECKS}/github-repos.sh",
                   "secret-scan": f"bash {REPO}/scripts/secret-scan.sh --worktree",
-                  "identity": None, "ping": None}),
+                  "ask": None, "identity": None, "ping": None}),
     "security": dict(
         purpose="Безопасность: firewall, выставленные порты, права секретов, "
                 "обновления, сканирование секретов.",
         capabilities=["security", "firewall", "secrets", "permissions", "exposure"],
         handlers={"audit": f"bash {CHECKS}/security-audit.sh",
-                  "identity": None, "ping": None}),
+                  "ports": f"bash {CHECKS}/security-ports.sh",
+                  "secrets": f"bash {CHECKS}/security-secrets.sh",
+                  "updates": f"bash {CHECKS}/security-updates.sh",
+                  "ask": None, "identity": None, "ping": None}),
     "monitoring": dict(
         purpose="Наблюдаемость: Prometheus targets, экспортеры, Grafana, правила "
                 "алертов, состояние шины агентов.",
         capabilities=["monitoring", "prometheus", "grafana", "metrics", "alerts"],
         handlers={"health": f"bash {CHECKS}/monitoring-health.sh",
-                  "identity": None, "ping": None}),
+                  "alerts": f"bash {CHECKS}/monitoring-alerts.sh",
+                  "targets": f"bash {CHECKS}/monitoring-targets.sh",
+                  "ask": None, "identity": None, "ping": None}),
     "backup": dict(
         purpose="Резервные копии и восстановление: свежесть, целостность, "
                 "репетиция восстановления.",
         capabilities=["backup", "restore", "recovery", "verify"],
         handlers={"status": f"bash {CHECKS}/backup-status.sh",
+                  "list": f"bash {CHECKS}/backup-list.sh",
                   "verify": f"bash {CHECKS}/backup-verify.sh",
-                  "identity": None, "ping": None}),
+                  "ask": None, "identity": None, "ping": None}),
 }
 
 def block(agent_id, purpose, capabilities, handlers, extra_lines=()):
@@ -179,6 +193,7 @@ for f in sorted(glob.glob(f"{proj_dir}/*.yaml")):
     if ctns:   env["PROJECT_CONTAINERS"] = " ".join(ctns)
     if health: env["PROJECT_HEALTH_URL"] = " ".join(health)
     h = {"status": {"run": f"bash {CHECKS}/project-check.sh", "env": env},
+         "ask": None,
          "identity": None, "ping": None}
     purpose = (f"Project agent для {slug}: {path or 'путь не найден'} "
                f"({repo or 'remote не определён'})")

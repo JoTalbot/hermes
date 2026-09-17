@@ -89,5 +89,6 @@ bus:
         PROJECT_SLUG: "octopus-deploy"
         PROJECT_PATH: "/opt/octopus-deploy"
         PROJECT_REPO: "https://github.com/JoTalbot/octopus-deploy"
+    ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in
