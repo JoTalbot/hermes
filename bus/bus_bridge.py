@@ -176,7 +176,7 @@ def tg_chat() -> dict | None:
 _rate_state = {"window": 0, "count": 0}
 
 
-def tg_send(text: str, channel: str | None = None, force: bool = False,
+def tg_send(text: str, channel: str | None = None, force: bool = False, markup: dict | None = None,
             keyboard: bool = False) -> tuple[bool, str]:
     token = tg_token()
     chat = tg_chat()
@@ -192,7 +192,9 @@ def tg_send(text: str, channel: str | None = None, force: bool = False,
         return False, "rate limit (bus message flood suppressed)"
     payload = {"chat_id": chat["chat_id"], "text": text,
                "parse_mode": "HTML", "disable_web_page_preview": True}
-    if keyboard:
+    if markup:
+        payload["reply_markup"] = markup
+    elif keyboard:
         payload["reply_markup"] = MAIN_KEYBOARD
     # Forum groups: route each channel to its topic, so #security is a topic, not a wall.
     topic = (chat.get("topics") or {}).get(channel or "")
@@ -272,10 +274,79 @@ def _stage_report(text: str) -> str:
     return str(tmp)
 
 
-def tg_reply_any(reply: str, keyboard: bool = False) -> tuple[bool, str]:
+# ── оценки ответов ─────────────────────────────────────────────────────────────
+FEEDBACK_FILE = Path(os.environ.get("HERMES_FEEDBACK_FILE",
+                                    "/var/lib/hermes-agents/feedback.jsonl"))
+FEEDBACK_TAGS = STATE_DIR / "feedback-tags.json"
+
+
+def feedback_tag_new(question: str, answer: str) -> str:
+    """Запомнить вопрос и начало ответа под коротким тегом — кнопка вернёт именно их."""
+    tag = f"{int(time.time())}-{os.urandom(2).hex()}"
+    try:
+        data = json.loads(FEEDBACK_TAGS.read_text()) if FEEDBACK_TAGS.exists() else {}
+    except Exception:
+        data = {}
+    data[tag] = {"q": (question or "")[:300], "a": (answer or "")[:300], "at": int(time.time())}
+    if len(data) > 200:                     # старые теги не нужны: кнопки живут часы
+        for k in sorted(data, key=lambda k: data[k].get("at", 0))[:-200]:
+            data.pop(k, None)
+    try:
+        FEEDBACK_TAGS.write_text(json.dumps(data, ensure_ascii=False))
+    except Exception as e:
+        log(f"feedback: не сохранить тег ({type(e).__name__}: {e})")
+    return tag
+
+
+def feedback_record(tag: str, verdict: str) -> tuple[bool, str]:
+    """Записать оценку владельца. Возвращает (принято, что показать в ответ на нажатие)."""
+    try:
+        data = json.loads(FEEDBACK_TAGS.read_text()) if FEEDBACK_TAGS.exists() else {}
+    except Exception:
+        data = {}
+    rec = data.pop(tag, None)
+    try:
+        FEEDBACK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with FEEDBACK_FILE.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                                 "epoch": int(time.time()), "verdict": verdict, "tag": tag,
+                                 "question": (rec or {}).get("q", ""),
+                                 "answer": (rec or {}).get("a", "")},
+                                ensure_ascii=False) + "\n")
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+    try:
+        FEEDBACK_TAGS.write_text(json.dumps(data, ensure_ascii=False))
+    except Exception:
+        pass
+    # Отрицательная оценка — сигнал, а не мусор: он виден в #incidents и в суточной сводке.
+    if verdict == "down":
+        log(f"feedback: 👎 по ответу на «{((rec or {}).get('q') or '?')[:70]}»")
+    return True, ("Спасибо, записал 👍" if verdict == "up" else "Понял: ответ мимо 👎 — учту")
+
+
+def tg_answer_callback(token: str, callback_id: str, text: str) -> None:
+    try:
+        tg_api(token, "answerCallbackQuery", {"callback_query_id": callback_id, "text": text[:200]},
+               timeout=10)
+    except Exception:
+        pass
+
+
+def tg_drop_markup(token: str, chat_id: int, message_id: int) -> None:
+    """Убрать кнопки после голосования: второй голос по тому же ответу не имеет смысла."""
+    try:
+        tg_api(token, "editMessageReplyMarkup",
+               {"chat_id": chat_id, "message_id": message_id, "reply_markup": {"inline_keyboard": []}},
+               timeout=10)
+    except Exception:
+        pass
+
+
+def tg_reply_any(reply: str, keyboard: bool = False, markup: dict | None = None) -> tuple[bool, str]:
     """A reply is a message if it fits; a document if it does not."""
     if len(reply) <= TG_TEXT_LIMIT:
-        return tg_send(reply, force=True, keyboard=keyboard)
+        return tg_send(reply, force=True, keyboard=keyboard, markup=markup)
     plain = re.sub(r"<[^>]+>", "", reply)
     tmp = STATE_DIR / f"reply-{int(time.time())}.txt"
     try:
@@ -658,7 +729,7 @@ def tg_poll_once(token: str, timeout: int = 25) -> int:
     try:
         d = tg_api(token, "getUpdates",
                    {"offset": offset, "timeout": timeout,
-                    "allowed_updates": ["message", "channel_post"]}, timeout=timeout + 15)
+                    "allowed_updates": ["message", "channel_post", "callback_query"]}, timeout=timeout + 15)
     except Exception as e:
         log(f"telegram poll failed: {type(e).__name__}: {e}")
         time.sleep(5)
@@ -671,6 +742,28 @@ def tg_poll_once(token: str, timeout: int = 25) -> int:
     handled = 0
     for up in d.get("result") or []:
         tg_offset_save(int(up["update_id"]) + 1)
+
+        # ── нажатие на 👍/👎 под ответом агента ────────────────────────────────
+        cq = up.get("callback_query") or {}
+        if cq:
+            data = str(cq.get("data") or "")
+            frm = cq.get("from") or {}
+            chat_id = ((cq.get("message") or {}).get("chat") or {}).get("id")
+            msg_id = (cq.get("message") or {}).get("message_id")
+            if data.startswith("fb|") and not frm.get("is_bot"):
+                parts = data.split("|", 2)
+                verdict = parts[1] if len(parts) > 1 else ""
+                tag = parts[2] if len(parts) > 2 else ""
+                if verdict in ("up", "down") and tag:
+                    ok, note = feedback_record(tag, verdict)
+                    tg_answer_callback(token, str(cq.get("id") or ""), note)
+                    if ok and chat_id and msg_id:
+                        tg_drop_markup(token, int(chat_id), int(msg_id))
+                    log(f"telegram callback: {verdict} on {tag} -> {note}")
+                    handled += 1
+                continue
+            continue
+
         m = up.get("message") or up.get("channel_post") or {}
         chat = m.get("chat") or {}
         frm = m.get("from") or {}
@@ -696,7 +789,12 @@ def tg_poll_once(token: str, timeout: int = 25) -> int:
         except Exception:
             pass
         reply = handle_owner_text(text)
-        ok, detail = tg_reply_any(reply, keyboard=want_keyboard)
+        # Кнопка оценки: под ответом владельцу, а не в меню — оценивают конкретный ответ.
+        tag = feedback_tag_new(text, reply)
+        fb_markup = {"inline_keyboard": [[
+            {"text": "👍 точный", "callback_data": f"fb|up|{tag}"},
+            {"text": "👎 мимо", "callback_data": f"fb|down|{tag}"}]]}
+        ok, detail = tg_reply_any(reply, keyboard=want_keyboard, markup=fb_markup)
         handled += 1
         if not ok:
             log(f"telegram reply failed: {detail}")

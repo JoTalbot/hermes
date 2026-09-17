@@ -31,4 +31,5 @@ else
   ACTIONS+=("места достаточно (${PCT}%) — действий не требуется")
 fi
 ACTIONS+=("крупные каталоги: du -xh --max-depth=2 / | sort -rh | head -20")
+report_proof "df -h · du -x --max-depth=1 / · lsblk · journalctl --disk-usage"
 report_footer "${ACTIONS[@]}"

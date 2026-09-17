@@ -88,3 +88,37 @@ Six real bugs were found and fixed on the way — the routing pattern `top` matc
 `pgrep -f` matching the check's own process, the digest's alert section failing inside an f-string,
 the digest importing the bus differently from the alert poller, two test-suite defects (relative paths
 after other sections changed directory; a stub that claimed every unit existed).
+
+
+## Batch 1–8 — owner's list, same day, third pass
+
+Eight items, all eight shipped with gates; the last wave's numbers are superseded by the ones below.
+
+| # | Item | Result on the node |
+|---|---|---|
+| 1 | container-guard | `CONTAINER-GUARD: OK` — 1 container checked, 0 drift, 0 restored; `docker update`, never a restart; timer 15 min |
+| 2 | copy behind upstream | `hermes_project_behind`: `fs 641`, `transcribe 340`, `ukraine 273`, `game 238`, `logistics 228` (two paths), `madworld 26`, rest 0 — visible for the first time; rule `HermesProjectStaleCopy` |
+| 3 | backup freshness | `hermes_backup_count 5` · `age 2.57 h` · `bytes 341 846 923`; rule `HermesBackupStale` (>48 h critical) |
+| 4 | wiring drift | `WIRING-GUARD: OK` — 0 drift, timer 30 min, `hermes_wiring_drift 0` |
+| 5 | clone/pull from chat | guarded verbs `clone-project` / `pull-project` (`JoTalbot` only, `/opt` and `/home/ubuntu` only, ff-only, confirmation for pull) |
+| 6 | ratings + mini-eval | 👍/👎 under every reply → `feedback.jsonl`; `eval-agents.sh` **20 из 20** (was 17/20 on the first run) |
+| 7 | journals | `journal-top`: 482.3 MB used, ceiling 500 MB, loudest `octopus.service` 12.7 MiB + 5×`octopus-child@` 12.5 MiB |
+| 8 | skills | 261 SKILL.md audited; plan written to `docs/SKILLS-TODO.md`; **nothing deleted** |
+
+**Tests:** `tests/run.sh` **234 passed · 0 failed · 0 skipped** (gate [17] = 30 static + 3 live).
+**Alert rules:** 25 live in Prometheus (6 new: container drift, guard stale, wiring drift, project
+stale copy, backup stale, journal growing).
+**Status:** READY — 15 PASS · 0 FAIL · 1 WARNING (MULTI-SERVER: no second physical host).
+
+**Four silent defects found by running the batch on the node and fixed:** the git-safety installer
+checked one user while the metric exporter runs as another (staleness metrics empty for every copy
+but one); the backup directory was traversable (`--x`) but not listable for the exporter, so
+`hermes_backup_count` reported 0 while 5 backups and 341 MB sat there; the routing alias «hermes»
+turned «статус hermes» (the stack) into a question about the `hermes-os` project; and the ratings
+report printed no `ИТОГ` until the first rating existed, which made the live gate blind to the empty
+state (the check now runs on a fixture and on the node's file).
+
+**Still open, waiting for the owner:** rating buttons have not been pressed in Telegram yet (the
+code path is verified on the node: both 👍 and 👎 record the question and answer and clear the tag);
+the 12 skills of ours declare no capability/bounds (`docs/SKILLS-TODO.md`); items 9 (TLS on 9119)
+and 10 (second server) were not part of this batch.

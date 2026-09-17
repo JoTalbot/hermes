@@ -35,4 +35,5 @@ for t in down[:5]: print(f\"  🔴 {t['labels'].get('job')} {t['scrapeUrl']} —
 
 ACTIONS=("если алерт горит: смотреть деталь и историю в Grafana http://129.213.177.56:3000")
 ACTIONS+=("проверить экспортёр Hermes: напиши «проверить мониторинг»")
+report_proof "curl /api/v1/rules · /api/v1/alerts · список таргетов Prometheus"
 report_footer "${ACTIONS[@]}"

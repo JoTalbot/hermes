@@ -57,6 +57,10 @@ INTENT_RULES: list[tuple[str, str, str, str]] = [
     (r"своп|swap|память|memory|ram|oom", "host-health", "память", "memory"),
     (r"сервис|юнит|systemd|упал|failed|не работа|остановлен", "host-health", "сервисы",
      "services"),
+    (r"что делали агент|история агент|история прогон|кто падал|ошибки агент|что было запущено",
+     "host-health", "история прогонов", "history"),
+    (r"сработал ли|действие сработало|проверь действие|подтверди действие|проверь перезапуск",
+     "host-health", "проверка действия", "verify"),
     (r"hermes|гермес|шина|bus|агент", "host-health", "стек Hermes", "hermes"),
     (r"хост|сервер|состояни|статус|проверь|проверить|здоровь", "host-health", "хост и сервисы",
      "status"),
@@ -108,7 +112,7 @@ PROJECT_ALIASES: dict[str, str] = {
     "перевод": "transcribe", "транскрип": "transcribe",
     "украин": "ukraine", "браузер": "browser", "игр": "game",
     "мадворлд": "madworld", "балансер": "aios", "баланс": "aios",
-    "гермес": "hermes-os", "hermes": "hermes-os",
+    "гермес": "hermes-os",
 }
 
 
@@ -138,9 +142,11 @@ ACTION_RULES: list[tuple[str, str, str]] = [
     (r"ротаци[яю] логов|проверни логи|rotate logs", "rotate-logs", "ротация журналов"),
     (r"почист[аи] старые логи|удали старые логи|clean-old-logs", "clean-old-logs",
      "чистка старых журналов"),
+    (r"склонируй|клонируй|clone", "clone-project", "клонирование проекта"),
+    (r"подтяни|обнови копию|git pull|pull-project", "pull-project", "обновление копии"),
 ]
 
-ACTION_OBJECTS = (r"контейнер|container|сервис|юнит|unit|демон|служб|том|volume")
+ACTION_OBJECTS = (r"контейнер|container|сервис|юнит|unit|демон|служб|том|volume|проект|копи")
 
 # «подтверждаю перезапусти сервис X» — явное согласие владельца на действие, меняющее данные.
 CONFIRM_CUES = (r"^\s*подтвержда|^\s*да,\s*подтвержда|^\s*confirm")
@@ -157,12 +163,22 @@ def parse_action(task: str) -> dict:
     if not verb:
         return {}
     target = subject(task)
+    if verb in ("clone-project", "pull-project"):
+        # «склонируй проект liza» / «подтяни копию fs»: subject() берёт только слова от 4 букв,
+        # а имена проектов бывают короткими (fs, uk). Берём слово сразу после «проект/копию».
+        m = re.search(r"(?:проект|project|копию|копия)[a-zа-я]*\s+([a-z0-9][a-z0-9_.\-]{1,})", low)
+        target = m.group(1) if m else target
     # Чистка без объекта применяется к узлу целиком; параметр срока, если назван.
     if verb in ("prune-images", "vacuum-journal", "rotate-logs"):
         return {"action": verb, "target": "", "why": kind}
     if verb == "backup-now":
         return {"action": verb, "target": "", "why": kind,
                 "confirm": "yes" if re.search(CONFIRM_CUES, task, re.I) else "no"}
+    if verb in ("clone-project", "pull-project"):
+        # клон только создаёт каталог — подтверждения не требует; обновление чужой копии требует
+        confirmed = bool(re.search(CONFIRM_CUES, task, re.I))
+        return {"action": verb, "target": target, "why": kind,
+                "confirm": "yes" if (verb == "clone-project" or confirmed) else "no"}
     if verb == "clean-old-logs":
         days = re.search(r"(\d{1,3})\s*(?:дн|day)", low)
         return {"action": verb, "target": "", "why": kind, "days": days.group(1) if days else "30",
@@ -228,16 +244,26 @@ def route(task: str, agents: dict) -> dict:
         out.update(target="orchestrator", handler="projects", why="вопрос о проектах")
         return out
 
-    # 0. имя объекта без слова «сервис/контейнер/процесс»: «что там с octopus-multisync».
-    #    Проверяется раньше проектов, иначе «octopus-multisync» был бы принят за проект
-    #    octopus (частичное совпадение), и вместо карточки юнита пришёл бы отчёт проекта.
-    cand = subject(task)
-    known_projects = {c.split(":", 1)[1] for c in caps if c.startswith("project:")}
-    if (cand and cand not in agents and cand not in known_projects
-            and cand not in SYSTEM_WORDS and len(cand) > 3):
-        out.update(capability="host-health", handler="lookup", facts_handler="lookup",
-                   why=f"объект «{cand}»", subject=cand)
-        return _finish(out, low)
+    # 0b. Сильные намерения раньше проекта: «проверь, сработал ли перезапуск octopus-browser»
+    #     — это проверка действия над контейнером, а не запрос про проект octopus, и
+    #     «что делали агенты» — это история прогонов, а не вопрос про стек.
+    for rx, cap, label, handler in INTENT_RULES:
+        if handler in ("verify", "history") and re.search(rx, low):
+            out.update(capability=cap, why=label, handler=handler, facts_handler=handler)
+            subj0 = subject(task)
+            if subj0:
+                out["subject"] = subj0
+            return _finish(out, low)
+
+    # 0c. Конкретный объект проекта: «octopus-multisync» — это юнит внутри проекта octopus,
+    #     и ответ должен быть про него, а не про проект целиком (иначе частичное совпадение
+    #     имени проекта перехватывает вопрос).
+    cand0 = subject(task)
+    for _cap, _name in ((c, c.split(":", 1)[1]) for c in caps if c.startswith("project:")):
+        if cand0 and cand0.startswith(_name + "-") and cand0 != _name:
+            out.update(capability="host-health", handler="lookup", facts_handler="lookup",
+                       why=f"объект «{cand0}»", subject=cand0)
+            return _finish(out, low)
 
     # 1. a project named in the task is the most specific signal
     projects = sorted(((c, c.split(":", 1)[1]) for c in caps if c.startswith("project:")),
@@ -247,7 +273,12 @@ def route(task: str, agents: dict) -> dict:
         if _project_hit(name, low):
             return _project_out(out, cap, name, what, f"проект «{name}»", low)
     for alias, target in PROJECT_ALIASES.items():
-        if alias in low:
+        # FACT (2026-09-17): синоним, совпадающий со словом о самой системе
+        # («hermes»), перехватывал вопросы о стеке; плюс синоним не должен
+        # матчиться внутри слова («топологистика» — не «логистик»).
+        if alias.lower() in SYSTEM_WORDS:
+            continue
+        if re.search(rf"(?<!\w){re.escape(alias)}", low):
             hits = [n for _, n in projects if n.lower().startswith(target)]
             if hits:
                 name = min(hits, key=len)
@@ -256,6 +287,10 @@ def route(task: str, agents: dict) -> dict:
     for cap, name in sorted(((c, c.split(":", 1)[1]) for c in caps
                              if c.startswith("project:")), key=lambda p: len(p[1])):
         stem = name.split("-")[0]
+        # «статус hermes» — это стек Hermes, а не проект hermes-os: слова о самой системе
+        # не становятся проектом по частичному совпадению.
+        if stem.lower() in SYSTEM_WORDS:
+            continue
         if len(stem) > 4 and stem.lower() in low:
             return _project_out(out, cap, name, what, f"проект «{name}»", low)
 
@@ -271,6 +306,17 @@ def route(task: str, agents: dict) -> dict:
                     # no name given: "что жрёт процессор" is the general load question
                     out.update(handler="top", facts_handler="top", why="загрузка CPU")
             return _finish(out, low)
+
+    # 0. имя объекта без слова «сервис/контейнер/процесс»: «что там с octopus-multisync».
+    #    Проверяется раньше проектов, иначе «octopus-multisync» был бы принят за проект
+    #    octopus (частичное совпадение), и вместо карточки юнита пришёл бы отчёт проекта.
+    cand = subject(task)
+    known_projects = {c.split(":", 1)[1] for c in caps if c.startswith("project:")}
+    if (cand and cand not in agents and cand not in known_projects
+            and cand not in SYSTEM_WORDS and len(cand) > 3):
+        out.update(capability="host-health", handler="lookup", facts_handler="lookup",
+                   why=f"объект «{cand}»", subject=cand)
+        return _finish(out, low)
 
     # 2b. «прогони тесты» без проекта: не угадываем чужой репозиторий, но и не молчим
     if what and not out.get("capability"):

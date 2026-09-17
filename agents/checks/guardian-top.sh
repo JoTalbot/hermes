@@ -61,4 +61,5 @@ if num_gt "$LOAD1" "$CORES"; then
 fi
 [[ "${SW_U:-0}" -gt 500 ]] && ACTIONS+=("swap почти полон — это про нехватку памяти, а не CPU")
 ACTIONS+=("полный отчёт по узлу: напиши «состояние сервера»")
+report_proof "top -bn1 · ps -eo %cpu,%mem,rss,cmd --sort=-%cpu | head"
 report_footer "${ACTIONS[@]}"

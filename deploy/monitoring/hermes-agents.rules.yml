@@ -184,3 +184,69 @@ groups:
           description: "Background runs are not supposed to hold the owner's questions. If
             the p95 wait stays above two minutes, either a project run is stuck or the
             concurrency is too low for this node."
+
+      - alert: HermesContainerLimitDrift
+        expr: hermes_container_limit_drift > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} container(s) lost their owner-approved memory limit"
+          description: "A limit set with `docker update` lives on the container, not on the
+            image: recreating the container silently removes it (FACT 2026-09-17, the browser
+            came back with Memory=0). container-guard.sh restores it every 15 minutes — this
+            alert means the restore itself is failing, or someone removes it repeatedly."
+
+      - alert: HermesContainerGuardStale
+        expr: hermes_container_guard_age_seconds > 3600
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The container limit guard has not run for over an hour"
+          description: "Nothing is enforcing the approved limits right now. Check
+            `systemctl status hermes-container-guard.timer`."
+
+      - alert: HermesWiringDrift
+        expr: hermes_wiring_drift > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Agent wiring differs from the generator"
+          description: "config/agents no longer matches what wire-agents.sh would produce, so
+            agents may be running with handlers or env that no longer describe reality.
+            wiring-guard.sh repairs it every 30 minutes; this alert means the repair is failing."
+
+      - alert: HermesProjectStaleCopy
+        expr: hermes_project_behind > 50
+        for: 6h
+        labels:
+          severity: info
+        annotations:
+          summary: "Local copy of {{ $labels.project }} is {{ $value }} commits behind GitHub"
+          description: "The work itself is safe on GitHub, but whatever runs from this checkout
+            is running old code. `pull-project <slug>` in the chat updates it (asks for
+            confirmation, refuses on a dirty tree)."
+
+      - alert: HermesBackupStale
+        expr: hermes_backup_age_hours > 48
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "The newest state backup is {{ printf \"%.0f\" $value }} hours old"
+          description: "hermes-backup.timer runs daily and verify-backup.sh checks the archive
+            right after. Two days without a backup means the schedule is broken — check
+            `systemctl status hermes-backup.timer` and journalctl -u hermes-backup."
+
+      - alert: HermesJournalGrowing
+        expr: hermes_journal_bytes > 1.5e9
+        for: 6h
+        labels:
+          severity: info
+        annotations:
+          summary: "systemd journal is {{ printf \"%.1f\" $value }} bytes despite SystemMaxUse=500M"
+          description: "Something is writing faster than journald rotates. Find the noisiest
+            unit with `bash agents/checks/journal-top.sh` and decide: rotate, compress, or fix
+            the writer. The loudest writer measured on 2026-09-17 was a project's own sync unit."

@@ -41,3 +41,17 @@ d=json.load(sys.stdin)
 for g in d['data']['groups']:
     if 'hermes' in g['name']:
         print('  loaded group:', g['name'], '->', len(g['rules']), 'rules')"
+
+# Экспортёр метрик должен уметь СТАТИСТИКУ по бэкапам (размер, свежесть). Каталог
+# /var/backups/hermes — 0700 root: без права входа он не отличает «бэкапа нет» от
+# «не вижу» (тот же класс ошибки, что и с проектами). Даётся только x — читать
+# содержимое по-прежнему может лишь владелец.
+METRICS_USER="$(systemctl show -p User --value hermes-metrics 2>/dev/null || true)"
+METRICS_USER="${METRICS_USER:-hermes}"
+if [[ -d /var/backups/hermes ]] && command -v setfacl >/dev/null; then
+  # DECISION (2026-09-17): r-x, а не x — экспортёру мало «войти» в каталог:
+  # без чтения списка glob() не находит файлы и hermes_backup_count врёт нулём.
+  setfacl -m "u:${METRICS_USER}:r-x" /var/backups/hermes 2>/dev/null && \
+    echo "  бэкапы видимы экспортёру метрик (u:${METRICS_USER}:r-x)"
+fi
+

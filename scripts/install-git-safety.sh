@@ -105,11 +105,18 @@ while IFS= read -r p; do
       ADDED=$((ADDED + 1))
     fi
   done
-  if check_one "$AGENT_USER" "$p"; then ok "$p — доступ выдан"
-  elif is_access_problem "$(git_reason "$AGENT_USER" "$p")"; then
+  # FACT (2026-09-17): проверка только пользователя агентов пропускала то, что экспортёр
+  # метрик (свой юнит, свой пользователь) продолжает видеть «dubious ownership» — и метрики
+  # отставания проектов молча пустели. Проверяем каждого, кто читает git.
+  MISSING=0
+  for u in "${USERS[@]}"; do
+    check_one "$u" "$p" || MISSING=$((MISSING + 1))
+  done
+  if (( MISSING == 0 )); then ok "$p — доступ выдан (${USERS[*]})"
+  elif is_access_problem "$(git_reason "${USERS[0]}" "$p")"; then
     bad "$p — доступ не выдан (разобрать вручную)"; BROKEN=$((BROKEN + 1))
   else
-    warn "$p — репозиторий нечитаем по другой причине: $(git_reason "$AGENT_USER" "$p" | cut -c1-70)"
+    warn "$p — репозиторий нечитаем по другой причине: $(git_reason "${USERS[0]}" "$p" | cut -c1-70)"
   fi
 done < <(paths)
 

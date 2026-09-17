@@ -462,6 +462,95 @@ ck "live: an irreversible action refuses without confirmation" "нужно по�
 rm -rf "$LKUPDIR"
 
 
+echo "[17] guards, staleness, feedback and the eval that checks understanding"
+cd "$REPO_ROOT"
+
+# сторожа
+ck "container guard exists and is idempotent" "CONTAINER-GUARD: OK" \
+   "$(grep -o 'CONTAINER-GUARD: OK' scripts/container-guard.sh | head -1)"
+ck "the guard restores limits without restarting the container" "docker update" \
+   "$(grep -o 'docker update' scripts/container-guard.sh | head -1)"
+ck "limits live in an owner-owned config file" "container-limits.conf" \
+   "$(grep -o 'container-limits.conf' scripts/install-container-guard.sh | head -1)"
+ck "the install keeps an existing limits file" "не трогаю" \
+   "$(grep -o 'не трогаю' scripts/install-container-guard.sh | head -1)"
+ck "wiring guard repairs drift and records it" "journal_write node change" \
+   "$(grep -o 'journal_write node change' scripts/wiring-guard.sh | head -1)"
+ck "the new installers run on a fresh node" "install-container-guard.sh" \
+   "$(grep -o 'install-container-guard.sh' scripts/install-agent-runtime.sh | head -1)"
+
+# метрики и правила
+ck "exporter reports project staleness" "hermes_project_behind" \
+   "$(grep -o 'hermes_project_behind' scripts/hermes_metrics_exporter.py | head -1)"
+ck "exporter reports backup freshness" "hermes_backup_age_hours" \
+   "$(grep -o 'hermes_backup_age_hours' scripts/hermes_metrics_exporter.py | head -1)"
+ck "exporter reports guard state" "hermes_container_limit_drift" \
+   "$(grep -o 'hermes_container_limit_drift' scripts/hermes_metrics_exporter.py | head -1)"
+ck "exporter reports the journal size" "hermes_journal_bytes" \
+   "$(grep -o 'hermes_journal_bytes' scripts/hermes_metrics_exporter.py | head -1)"
+ck "exporter reports owner feedback" "hermes_feedback_total" \
+   "$(grep -o 'hermes_feedback_total' scripts/hermes_metrics_exporter.py | head -1)"
+for rule in HermesContainerLimitDrift HermesWiringDrift HermesProjectStaleCopy HermesBackupStale HermesJournalGrowing; do
+  ck "alert rule $rule is shipped" "$rule" \
+     "$(grep -o "alert: $rule" deploy/monitoring/hermes-agents.rules.yml | head -1)"
+done
+
+# действия из чата
+ck "clone-project is a guarded verb" "clone-project)" \
+   "$(grep -o 'clone-project)' agents/checks/act.sh | head -1)"
+ck "clone only from the owner's GitHub" "github.com/JoTalbot/*" \
+   "$(grep -o 'github.com/JoTalbot/\*' agents/checks/act.sh | head -1)"
+ck "pull refuses on a dirty tree" "незакоммиченное — чья-то работа" \
+   "$(grep -o 'незакоммиченное — чья-то работа' agents/checks/act.sh | head -1)"
+ck "pull requires confirmation" '"confirm": "yes" if (verb == "clone-project" or confirmed)' \
+   "$(grep -o '"confirm": "yes" if (verb == "clone-project" or confirmed)' agents/routing.py | head -1)"
+ck "routing knows the clone verb" "clone-project" \
+   "$(grep -o 'clone-project' agents/routing.py | head -1)"
+
+# оценки ответов
+ck "the bus can receive callback_query" "callback_query" \
+   "$(grep -o 'callback_query' bus/bus_bridge.py | head -1)"
+ck "the bus records a rating with its question" "def feedback_record" \
+   "$(grep -o 'def feedback_record' bus/bus_bridge.py | head -1)"
+ck "the reply carries the rating buttons" "fb|up|" \
+   "$(grep -o 'fb|up|' bus/bus_bridge.py | head -1)"
+ck "feedback is reported to the owner" "ОЦЕНКИ ОТВЕТОВ" \
+   "$(grep -o 'ОЦЕНКИ ОТВЕТОВ' agents/checks/feedback.sh | head -1)"
+ck "the day digest includes ratings" "ОЦЕНКИ ОТВЕТОВ" \
+   "$(grep -o 'ОЦЕНКИ ОТВЕТОВ' agents/checks/digest.sh | head -1)"
+
+# журнал и скиллы
+ck "journal-top names the loudest writer" "самый громкий" \
+   "$(grep -o 'самый громкий' agents/checks/journal-top.sh | head -1)"
+ck "the skills audit can be strict" "--strict" \
+   "$(grep -o '\-\-strict' scripts/audit-skills.sh | head -1)"
+ck "the skills audit writes a plan instead of deleting" "SKILLS-TODO.md" \
+   "$(grep -o 'SKILLS-TODO.md' scripts/audit-skills.sh | head -1)"
+ck "core checks now cite their commands" "report_proof" \
+   "$(grep -o 'report_proof' agents/checks/guardian-disk.sh | head -1)"
+
+# живое: прогон «понимает ли система вопросы владельца»
+if [[ -x .venv-bus/bin/python ]]; then
+  EV="$(bash scripts/eval-agents.sh 2>&1 | tail -1)"
+  ck "live: every sample question reaches the right agent" "20 из 20" "$EV"
+  OUT7="$(bash agents/checks/journal-top.sh 2>&1 | head -3 | tr '\n' ' ')"
+  ck "live: journal-top runs on this node" "КТО ПИШЕТ В ЖУРНАЛ" "$OUT7"
+  # Фикстура, а не боевой файл: тест не должен писать в то, что проверяет.
+  FBDIR="$(mktemp -d)"; printf '%s\n' \
+    "{\"epoch\": $(( $(date +%s) - 300 )), \"verdict\": \"up\", \"question\": \"сколько памяти\", \"answer\": \"5.5 GiB\"}" \
+    "{\"epoch\": $(( $(date +%s) - 120 )), \"verdict\": \"down\", \"question\": \"что с хромом\", \"answer\": \"не знаю\"}" \
+    > "$FBDIR/feedback.jsonl"
+  OUT8="$(HERMES_FEEDBACK_FILE="$FBDIR/feedback.jsonl" bash agents/checks/feedback.sh 2>&1 | tail -1)"
+  ck "live: feedback report renders" "ИТОГ" "$OUT8"
+  ck "live: feedback counts up and down" "точных 50%" "$OUT8"
+  OUT9="$(bash agents/checks/feedback.sh 2>&1 | tail -1)"
+  ck "live: feedback report renders on the node file too" "ИТОГ" "$OUT9"
+  rm -rf "$FBDIR"
+else
+  ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); echo "  ~ live eval checks skipped (нет venv шины)"
+fi
+
+
 echo
 echo "════ $PASS passed · $FAIL failed · $SKIP skipped ════"
 [[ $FAIL -eq 0 ]]

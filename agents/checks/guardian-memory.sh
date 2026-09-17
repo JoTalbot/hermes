@@ -26,4 +26,5 @@ ACTIONS=()
 num_ge "$PCT" 90 && ACTIONS+=("память почти кончилась — проверить OOM: journalctl -k | grep -i oom")
 num_ge "$(pct_of "$SW_U" "$SW_T")" 50 && ACTIONS+=("swap активно используется — это просадка производительности, искать утечку")
 ACTIONS+=("кто именно растёт: ps -eo rss,pmem,args --sort=-rss | head")
+report_proof "free -m · /proc/meminfo · ps -eo rss · docker stats --no-stream"
 report_footer "${ACTIONS[@]}"

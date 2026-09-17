@@ -638,9 +638,180 @@ def probe_model_telemetry() -> list[str]:
     return out
 
 
+def _guard_state(path: str) -> dict:
+    try:
+        return json.loads(open(path, encoding="utf-8").read())
+    except Exception:
+        return {}
+
+
+def probe_guard_state() -> list[str]:
+    """Сторожа: лимиты контейнеров и разводка агентов.
+
+    Числа берутся из состояния, которое пишут scripts/container-guard.sh и
+    scripts/wiring-guard.sh (у экспортёра нет прав docker, и не нужно их давать ради метрики).
+    Раньше обе защиты могли исчезнуть молча: лимит снимается вместе с пересозданием
+    контейнера, разводка уезжает от чужого контейнера — и ни одна метрика не двигалась.
+    """
+    out = [
+        "# HELP hermes_container_limit_drift Containers whose live memory limit differs from the",
+        "#   approved one at the last guard run",
+        "# TYPE hermes_container_limit_drift gauge",
+        "# HELP hermes_container_guard_age_seconds Seconds since the container guard last ran",
+        "# TYPE hermes_container_guard_age_seconds gauge",
+        "# HELP hermes_wiring_drift 1 if agent wiring differed from the generator at the last check",
+        "# TYPE hermes_wiring_drift gauge",
+        "# HELP hermes_wiring_guard_age_seconds Seconds since the wiring guard last ran",
+        "# TYPE hermes_wiring_guard_age_seconds gauge",
+    ]
+    now = time.time()
+    cg = _guard_state(os.environ.get("HERMES_CONTAINER_GUARD_STATE",
+                                     "/var/lib/hermes-bus/container-guard.json"))
+    if cg:
+        out.append(f"hermes_container_limit_drift {int(cg.get('drift') or 0)}")
+        out.append(f"hermes_container_guard_age_seconds {max(0, int(now - int(cg.get('ts') or 0)))}")
+    else:
+        out.append("hermes_container_guard_age_seconds -1")
+    wg = _guard_state(os.environ.get("HERMES_WIRING_GUARD_STATE",
+                                     "/var/lib/hermes-bus/wiring-guard.json"))
+    if wg:
+        out.append(f"hermes_wiring_drift {int(wg.get('drift') or 0)}")
+        out.append(f"hermes_wiring_guard_age_seconds {max(0, int(now - int(wg.get('ts') or 0)))}")
+    else:
+        out.append("hermes_wiring_guard_age_seconds -1")
+    return out
+
+
+def probe_project_staleness() -> list[str]:
+    """Насколько локальная копия проекта отстала от GitHub.
+
+    FACT (2026-09-17): копии пяти проектов были трёхдневной давности (fs — на 641 коммит
+    позади), а метрик на это не было: экспортёр отдавал только dirty. Оркестратор при этом
+    работал на устаревшем коде, и ни одно правило об этом не сказало.
+    """
+    out = [
+        "# HELP hermes_project_behind Commits the local copy is behind its upstream",
+        "# TYPE hermes_project_behind gauge",
+        "# HELP hermes_project_ahead Commits the local copy has not pushed to upstream",
+        "# TYPE hermes_project_ahead gauge",
+    ]
+    import glob
+    try:
+        import yaml  # type: ignore
+    except Exception:
+        return out
+    for f in glob.glob("/opt/hermes/config/agents/projects/*.yaml"):
+        try:
+            d = yaml.safe_load(open(f)) or {}
+        except Exception:
+            continue
+        tech = d.get("technology") or {}
+        path = tech.get("local_path")
+        if not path or not os.path.isdir(os.path.join(path, ".git")):
+            continue
+        slug = re.sub(r"[^A-Za-z0-9_-]", "_", os.path.basename(f)[:-5])
+        for label, rev in (("behind", "HEAD..@{u}"), ("ahead", "@{u}..HEAD")):
+            try:
+                r = subprocess.run(["git", "-C", path, "rev-list", "--count", rev],
+                                   capture_output=True, text=True, timeout=10)
+                if r.returncode != 0 or not r.stdout.strip().isdigit():
+                    continue
+                out.append(f'hermes_project_{label}{{project="{slug}"}} {int(r.stdout.strip())}')
+            except Exception:
+                continue
+    return out
+
+
+def probe_backup() -> list[str]:
+    """Свежесть бэкапа: расписание есть, а если таймер отвалится — никто не заметит."""
+    out = [
+        "# HELP hermes_backup_age_hours Hours since the newest state backup",
+        "# TYPE hermes_backup_age_hours gauge",
+        "# HELP hermes_backup_count State backups kept on disk",
+        "# TYPE hermes_backup_count gauge",
+        "# HELP hermes_backup_bytes Total size of the backup directory",
+        "# TYPE hermes_backup_bytes gauge",
+    ]
+    import glob
+    root = os.environ.get("HERMES_BACKUP_DIR", "/var/backups/hermes")
+    files = glob.glob(os.path.join(root, "hermes-state-*.tar.gz"))
+    out.append(f"hermes_backup_count {len(files)}")
+    if not files:
+        out.append("hermes_backup_age_hours -1")
+        return out
+    newest = max(files, key=lambda p: os.path.getmtime(p))
+    out.append(f"hermes_backup_age_hours {(time.time() - os.path.getmtime(newest)) / 3600:.2f}")
+    total = 0
+    for p in files:
+        try:
+            total += os.path.getsize(p)
+        except OSError:
+            pass
+    out.append(f"hermes_backup_bytes {total}")
+    return out
+
+
+def probe_journal() -> list[str]:
+    """Размер системного журнала: 1.0 GiB при потолке 500M говорит, что ротация не успевает."""
+    out = [
+        "# HELP hermes_journal_bytes Bytes used by the systemd journal",
+        "# TYPE hermes_journal_bytes gauge",
+    ]
+    total = 0
+    try:
+        for dirpath, _dirs, files in os.walk("/var/log/journal"):
+            for f in files:
+                try:
+                    total += os.path.getsize(os.path.join(dirpath, f))
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    out.append(f"hermes_journal_bytes {total}")
+    return out
+
+
+def probe_feedback() -> list[str]:
+    """Оценки владельца: 👍/👎 под ответами агентов. Качество измеряется, а не предполагается."""
+    out = [
+        "# HELP hermes_feedback_total Owner ratings of agent answers (verdict=up|down)",
+        "# TYPE hermes_feedback_total counter",
+        "# HELP hermes_feedback_24h Ratings in the last 24 hours",
+        "# TYPE hermes_feedback_24h gauge",
+    ]
+    path = os.environ.get("HERMES_FEEDBACK_FILE", "/var/lib/hermes-agents/feedback.jsonl")
+    up = down = up24 = down24 = 0
+    now = time.time()
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                fresh = now - int(r.get("epoch") or 0) <= 86400
+                if r.get("verdict") == "up":
+                    up += 1
+                    up24 += 1 if fresh else 0
+                elif r.get("verdict") == "down":
+                    down += 1
+                    down24 += 1 if fresh else 0
+    except OSError:
+        pass
+    out.append(f'hermes_feedback_total{{verdict="up"}} {up}')
+    out.append(f'hermes_feedback_total{{verdict="down"}} {down}')
+    out.append(f"hermes_feedback_24h {up24 + down24}")
+    return out
+
+
 PROBES = (probe_units, probe_host_pressure, probe_shim, probe_balancer, probe_agents, probe_bus,
           probe_github, probe_tailscale, probe_agent_bus, probe_bus_agents,
-          probe_projects, probe_agent_history, probe_model_telemetry)
+          probe_projects, probe_agent_history, probe_model_telemetry,
+          probe_guard_state, probe_project_staleness, probe_backup, probe_journal,
+          probe_feedback)
 
 
 class Handler(BaseHTTPRequestHandler):

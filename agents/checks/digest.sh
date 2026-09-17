@@ -126,6 +126,43 @@ report_kv "отстают от GitHub" "$BEHIND"
 [[ -n "$DETAIL" ]] && printf '%s' "$DETAIL" | head -6
 report_proof "Обход config/agents/projects/*.yaml → git status/rev-list по каждому пути"
 
+# ── 3b. оценки владельца ──────────────────────────────────────────────────────
+FB="${HERMES_FEEDBACK_FILE:-/var/lib/hermes-agents/feedback.jsonl}"
+if [[ -s "$FB" ]]; then
+  report_section "🗳 ОЦЕНКИ ОТВЕТОВ"
+  FB_FILE="$FB" python3 - <<'PY'
+import json, os, time
+up = down = 0
+questions = []
+now = time.time()
+try:
+    for line in open(os.environ["FB_FILE"], encoding="utf-8"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if now - int(r.get("epoch") or 0) > 86400:
+            continue
+        if r.get("verdict") == "up":
+            up += 1
+        elif r.get("verdict") == "down":
+            down += 1
+            questions.append((r.get("question") or "?").replace("\n", " ")[:60])
+total = up + down
+if total == 0:
+    print("  за сутки оценок не было")
+else:
+    share = 100 * up // total
+    print(f"  👍 {up} · 👎 {down} · точных {share}%")
+    for q in questions[:3]:
+        print(f"    • не попал ответ на «{q}»")
+PY
+  report_proof "tail /var/lib/hermes-agents/feedback.jsonl"
+fi
+
 # ── 4. бэкап и очередь ────────────────────────────────────────────────────────
 report_section "💾 БЭКАП И ОЧЕРЕДЬ"
 LAST_BK="$(ls -1t /var/backups/hermes/hermes-state-*.tar.gz 2>/dev/null | head -1)"

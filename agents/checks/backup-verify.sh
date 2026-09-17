@@ -30,4 +30,5 @@ tar tzf "$NEW" 2>/dev/null | grep -c 'profiles/' | awk '{printf "  • файл�
 ACTIONS=()
 [[ "$CNT" -le 50 ]] && ACTIONS+=("проверить, что таймер вообще собирает состояние: journalctl -u hermes-backup.service -n 30")
 ACTIONS+=("репетиция восстановления: bash scripts/restore.sh <архив> --force --no-systemd в отдельном контейнере")
+report_proof "tar -tzf <архив> · сравнение состава с ожидаемым списком каталогов"
 report_footer "${ACTIONS[@]}"

@@ -663,3 +663,78 @@ delivered through the same Telegram channel as the alerts. `--test` sends it now
 **Skills.** `bash scripts/audit-skills.sh` inventories every SKILL.md under /opt/hermes/skills and
 /root/agents, reports duplicate titles and full copies, and flags skills with no declared capability
 or bounds. It never deletes anything: 260 skills are somebody's work and the decision is the owner's.
+
+
+## Owner batch 1–8: guards, staleness, ratings, skills (2026-09-17, third pass)
+
+Eight items the owner listed in one line, each with a gate in `tests/run.sh` (§[17]).
+
+**Container limits as a checked invariant.** `bash scripts/install-container-guard.sh` writes
+`/etc/hermes/container-limits.conf` (`<container> <memory> <swap>`) and installs
+`hermes-container-guard.timer` (15 min). `bash scripts/container-guard.sh` compares the live
+`docker inspect` values with the file, restores drift with `docker update` (never restarts a
+container, never touches one that is not in the file) and prints `CONTAINER-GUARD: OK|DRIFT`.
+`--seed` fills the file from what is running now; `--check` tells whether it is installed.
+State: `/var/lib/hermes-bus/container-guard.json`.
+
+**Wiring as a checked invariant.** `bash scripts/install-wiring-guard.sh` +
+`bash scripts/wiring-guard.sh` (timer 30 min) verify that every agent in
+`config/agents/*.yaml` is present in the running registry, that its check scripts exist and are
+executable, and that project agents point at existing paths. Output `WIRING-GUARD: OK|DRIFT`,
+state `/var/lib/hermes-bus/wiring-guard.json`.
+
+**Staleness that used to be invisible.** The exporter now reports `hermes_project_behind` /
+`hermes_project_ahead` per project, and freshness of everything else:
+`hermes_backup_age_hours`, `hermes_backup_count`, `hermes_backup_bytes`, `hermes_journal_bytes`,
+`hermes_feedback_total{verdict=...}`, `hermes_container_guard_age_seconds`,
+`hermes_wiring_guard_age_seconds`, `hermes_container_limit_drift`, `hermes_wiring_drift`.
+Six new alert rules: `HermesContainerLimitDrift`, `HermesGuardStale`, `HermesWiringDrift`,
+`HermesProjectStaleCopy` (>50 commits behind for 6 h), `HermesBackupStale` (>48 h, critical),
+`HermesJournalGrowing`. Reload rules only through `bash scripts/install-monitoring.sh`
+(it backs up and SIGHUPs; the Prometheus container's `/-/reload` answers 403).
+
+```bash
+# why is a copy behind?  (641 at the time of writing, on a copy nobody looked at)
+curl -s localhost:9725/metrics | grep hermes_project_behind
+# is the guard still running?
+curl -s localhost:9725/metrics | grep -E 'guard_age|_drift'
+```
+
+**Project copies from the chat.** `clone-project` and `pull-project` are guarded verbs in
+`agents/checks/act.sh`: only `github.com/JoTalbot/*`, destination only under `/opt/*` or
+`/home/ubuntu/*`, clone refuses if the copy already exists, pull is fast-forward only and refuses
+on a dirty tree and asks for «подтверждаю …» first. routing.py understands
+«склонируй проект liza», «подтяни копию fs» — the target is taken from «проект/копию X».
+
+**Ratings under every answer.** Every Telegram reply carries «👍 точный / 👎 мимо»
+(`fb|up|down|<tag>`); the bus honours `callback_query`, records the question and the answer that
+were rated into `/var/lib/hermes-agents/feedback.jsonl` (tags in
+`/var/lib/hermes-agents/feedback-tags.json`, ≤200), answers the tap and drops the buttons so the
+same reply cannot be rated twice. A 👎 also lands in the log. Reports:
+`bash agents/checks/feedback.sh` (totals, 24 h, share of exact answers, list of 👎, frequent words)
+and the digest's «🗳 ОЦЕНКИ ОТВЕТОВ» section.
+
+**Journals.** `bash agents/checks/journal-top.sh` — how much the journal takes, the ceiling
+(500 MiB), the ten loudest units over 24 h and the single loudest writer by name, so «why is the
+disk full» is one command. (Here the loudest are `octopus.service` and five `octopus-child@` units —
+someone else's project, rotation for them only with the owner's agreement.)
+
+**Understanding, measured.** `bash scripts/eval-agents.sh` asks 20 real owner questions and checks
+capability, handler and subject; `--json` for machines, `--live` to also run the node's registry.
+It caught two real routing defects (below). `bash scripts/audit-skills.sh --strict` exits non-zero
+for *our* skills without declared capability/bounds, `--plan` writes `docs/SKILLS-TODO.md` — a plan
+for the owner, it deletes nothing.
+
+**Fixed while running the batch on the node** (all four were silent lies):
+1. `install-git-safety.sh` only checked the agent user, while the metric exporter runs as its own
+   user — `hermes_project_behind` stayed empty for every copy but one. Now every user that reads git.
+2. `install-monitoring.sh` gave the exporter `--x` on `/var/backups/hermes`: it could enter the
+   directory but not list it, so `glob()` found nothing and `hermes_backup_count` reported 0 / −1 h
+   for a directory holding 5 files and 341 MB. Now `r-x` (file contents stay root-only).
+3. routing.py: the Latin alias «hermes» mapped to the project `hermes-os`, so «статус hermes»
+   (the stack) answered about a project. Aliases that are system words are ignored, and aliases no
+   longer match inside a word («топологистика» ≠ «логистик»).
+4. The eval expected a subject where the question has none («какие агенты?») — a test defect, not
+   a routing one; and the ratings report printed no `ИТОГ` line until the first rating existed, so
+   the live gate could not see the empty state. Both fixed; the live ratings check now runs on a
+   fixture and on the node's file.

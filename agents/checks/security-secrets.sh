@@ -26,4 +26,5 @@ cd /opt/hermes 2>/dev/null && bash scripts/secret-scan.sh --worktree 2>/dev/null
 
 ACTIONS=("права чинить: chmod 600 <файл>, владелец root:root")
 ACTIONS+=("скан истории репозитория: напиши «secret-scan»")
+report_proof "stat -c %a по файлам секретов · grep -r по ключам в git-деревьях"
 report_footer "${ACTIONS[@]}"
