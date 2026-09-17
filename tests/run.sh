@@ -455,7 +455,9 @@ ck "live: lookup reports the unit state" "состояние" "$(printf '%s' "$O
 ck "live: lookup cites its evidence" "доказательство" "$(printf '%s' "$OUT4" | grep -o 'доказательство' | head -1)"
 OUT5="$(PATH="$LKUPDIR/bin:$PATH" ARG_NAME=no-such-object-xyz bash agents/checks/lookup.sh 2>&1)"
 ck "live: an unknown name is answered honestly" "нет ничего с именем" "$(printf '%s' "$OUT5" | grep -o 'нет ничего с именем' | head -1)"
-OUT6="$(ARG_ACTION=clean-old-logs ARG_DAYS=30 bash agents/checks/act.sh 2>&1)"
+# Журнал для этого прогона — временный: тест не должен оставлять следов в рабочих журналах
+# (первый прогон добавил три записи «запрошено подтверждение» в журнал узла).
+OUT6="$(HERMES_JOURNAL_ROOT="$LKUPDIR/journal" ARG_ACTION=clean-old-logs ARG_DAYS=30 bash agents/checks/act.sh 2>&1)"
 ck "live: an irreversible action refuses without confirmation" "нужно подтверждение" "$(printf '%s' "$OUT6" | grep -o 'нужно подтверждение' | head -1)"
 rm -rf "$LKUPDIR"
 
