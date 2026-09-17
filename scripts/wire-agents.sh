@@ -64,7 +64,14 @@ def containers(slug: str) -> list[str]:
     # Exact-ish match only: matching on the first token made project "hermes-os" claim
     # hermes-node-02/03 as its containers, so its wiring block changed whenever a peer
     # node was created and `wire-agents.sh --check` reported drift forever.
-    return sorted({n for n in out.split() if n == slug or n.startswith(slug + "-")})[:4]
+    #
+    # FACT (2026-09-17): контейнер браузера пересоздали, старый остался как
+    # `octopus-browser-chromium.bak.<ts>` — discovery принял его за рабочий контейнер
+    # проекта, разводка уехала в DRIFT, и doctor показывал DEGRADED. Копии и черновики
+    # (.bak/.old/.tmp/.orig) — не рабочие контейнеры: не разводим их и не будим дрейф.
+    keep = [n for n in out.split()
+            if (n == slug or n.startswith(slug + "-")) and not re.search(r"\.(bak|old|orig|tmp)([.\-_]|$)", n)]
+    return sorted(set(keep))[:4]
 
 # ── core specialists ────────────────────────────────────────────────────────
 CORE = {
