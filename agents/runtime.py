@@ -97,7 +97,9 @@ def history_append(record: dict) -> None:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception as e:  # noqa: BLE001
         log(f"history: запись не удалась ({type(e).__name__}: {e})")
-MAX_CONCURRENT = 2
+MAX_CONCURRENT = 2          # интерактивные задачи: владелец, алерты, ответы
+MAX_BACKGROUND = 1          # фоновые прогоны (тесты проектов и т. п.) — не задерживают владельца
+QUEUE_NOTICE = 120          # столько секунд ожидания терпимо, прежде чем сказать владельцу
 OUTPUT_LIMIT = 6000
 
 # Сколько задача может числиться «в работе». Пока ответа нет, задача остаётся в pending;
@@ -396,7 +398,11 @@ def builtin(agent: Agent, handler: str, args: dict) -> dict | None:
 class Runtime:
     def __init__(self) -> None:
         self.agents = load_agents()
+        # Две очереди вместо одной. Факт: тяжёлый прогон тестов проекта (до 420 с) держал
+        # слот, и простой вопрос владельца ждал в общей очереди. Теперь интерактивные
+        # задачи и фон разведены: фон не может занять больше MAX_BACKGROUND слотов.
         self.sem = asyncio.Semaphore(MAX_CONCURRENT)
+        self.sem_bg = asyncio.Semaphore(MAX_BACKGROUND)
         self.pending: dict[str, dict] = {}
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         self.pending_file = STATE_DIR / "pending.json"
@@ -438,6 +444,42 @@ class Runtime:
             self.pending_file.write_text(json.dumps(self.pending, indent=1))
         return rec
 
+    # -- queueing ------------------------------------------------------------
+    @staticmethod
+    def is_background(env: dict) -> bool:
+        """Фоновая задача — та, что не ждёт ответа владельца прямо сейчас.
+
+        Прогон тестов проекта идёт минутами, и держать его в одной очереди с вопросом
+        «что с диском» означает, что вопрос ждёт молча.
+        """
+        prio = str(env.get("priority") or "normal").lower()
+        if prio in ("low", "background", "bg"):
+            return True
+        args = env.get("args") if isinstance(env.get("args"), dict) else {}
+        handler = str(args.get("handler") or env.get("handler") or "")
+        return handler in ("run", "dispatch") and prio != "high"
+
+    async def acquire(self, env: dict, notify=None) -> tuple[asyncio.Semaphore, int]:
+        """Занять слот в нужной очереди. Возвращает (семафор, ожидание_мс).
+
+        Если ждать приходится дольше QUEUE_NOTICE секунд, владельцу уходит одно сообщение:
+        молчаливое ожидание выглядит как сломанный агент.
+        """
+        sem = self.sem_bg if self.is_background(env) else self.sem
+        started = time.time()
+        try:
+            await asyncio.wait_for(sem.acquire(), timeout=QUEUE_NOTICE)
+        except asyncio.TimeoutError:
+            waited = int(time.time() - started)
+            log(f"queue: задача ждёт уже {waited}s, сообщаю владельцу")
+            if notify:
+                try:
+                    await notify(waited)
+                except Exception as e:      # noqa: BLE001 — уведомление не важнее работы
+                    log(f"queue: уведомление не ушло ({type(e).__name__}: {e})")
+            await sem.acquire()
+        return sem, int((time.time() - started) * 1000)
+
     # -- task execution ------------------------------------------------------
     @staticmethod
     def parse_request(env: dict) -> tuple[str, dict]:
@@ -456,14 +498,20 @@ class Runtime:
                     args[k] = v
         return handler, args
 
-    async def handle(self, agent: Agent, env: dict, reply_to: str | None = None) -> dict:
+    async def handle(self, agent: Agent, env: dict, reply_to: str | None = None,
+                     notify=None) -> dict:
         handler, args = self.parse_request(env)
-        async with self.sem:
+        sem, waited_ms = await self.acquire(env, notify)
+        try:
             res = builtin(agent, handler, args)
             if res is None:
                 res = await asyncio.to_thread(run_handler, agent, handler, args,
                                               env.get("from") or "unknown")
+        finally:
+            sem.release()
         res["handler"] = handler
+        if waited_ms >= 1000:
+            res["queue_ms"] = waited_ms
         return res
 
     async def on_message(self, nc, agent: Agent, env: dict, channel: str | None,
@@ -515,7 +563,14 @@ class Runtime:
         if agent.id == "orchestrator" and handler_name in ("dispatch", "route", "task"):
             await self.dispatch(nc, agent, {**env, "args": args}, channel)
             return
-        res = await self.handle(agent, env)
+        async def _notify_wait(waited: int) -> None:
+            await self.publish(nc, channel=channel, to=None if channel else who, kind="event",
+                               text=(f"⏳ Ваша задача ещё в очереди: {waited} с. Впереди — "
+                                     f"другие задачи, фон не вытесняет ваши запросы.\n"
+                                     f"Что сейчас выполняется: «что делали агенты»."),
+                               priority="high", agent="orchestrator")
+
+        res = await self.handle(agent, env, notify=_notify_wait)
         took = round(time.time() - started, 2)
         head = f"{agent.id}.{res['handler']} → {'OK' if res['ok'] else 'FAIL'}"
         body = f"{head} ({took}s)\n{res['text']}"
@@ -569,9 +624,12 @@ class Runtime:
         # "что с процессом chromium" would explain the whole host instead of chromium.
         fact_args = {k: v for k, v in (args or {}).items()
                      if k not in ("handler", "facts_handler") and v}
-        async with self.sem:
+        sem, waited_ms = await self.acquire(env)
+        try:
             facts = await asyncio.to_thread(run_handler, agent, facts_handler, fact_args,
                                             env.get("from") or "unknown")
+        finally:
+            sem.release()
         fact_text = facts.get("text") or "(нет данных)"
         analysis = bool(env.get("args", {}).get("analysis")) or True
         model, why = models.model_for(agent.id, task, analysis=analysis)
@@ -579,6 +637,25 @@ class Runtime:
             models.ask, task, fact_text, agent.id, agent.description, str(server_id()), model)
         meta_line = (f"модель {meta.get('model')} ({why}) · "
                      f"{meta.get('latency_ms', 0)} мс")
+        # Телеметрия модели: какой тир был выбран, ответил ли он и не пришлось ли падать
+        # на локальную модель. Раньше это было невидимо: балансер мог деградировать, а
+        # система продолжала отвечать — уже дороже и медленнее.
+        history_append({
+            "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "epoch": int(time.time()),
+            "agent": agent.id,
+            "handler": "ask",
+            "actor": env.get("from") or "unknown",
+            "code": 0 if meta.get("ok") else 1,
+            "took_ms": int(meta.get("latency_ms") or 0),
+            "queue_ms": waited_ms,
+            "tier": model,
+            "model": meta.get("model") or "",
+            "fallback": meta.get("fallback") or (f"escalated from {meta['escalated_from']}"
+                                                 if meta.get("escalated_from") else ""),
+            "usage": meta.get("usage") or {},
+            "summary": (text or note[:120]).strip().splitlines()[0][:160],
+        })
         if not text:
             # Never fail the task: give the measurements and say plainly that the model is out.
             note = (f"⚠️ Модель недоступна ({meta.get('fallback') or 'нет ответа'}), "
@@ -627,7 +704,11 @@ class Runtime:
             decision_args = {**decision_args, "subject": args["subject"]}
         if not target and not capability:
             decision = self.route(task)
-            decision_args = decision
+            # action/target/confirm/days — параметры защищённого действия (routing.parse_action):
+            # act.sh получает их как ARG_* и без них выполнит не то, что просили.
+            decision_args = {k: v for k, v in decision.items()
+                             if k in ("subject", "action", "target_object", "target",
+                                      "confirm", "days", "why", "need_project")}
             capability = decision["capability"]
             target = decision["target"]
             why = decision["why"]
@@ -658,7 +739,9 @@ class Runtime:
                                          "• сделать бэкап\n"
                                          "• аудит безопасности\n"
                                          "• статус проекта logistics\n"
-                                         "• прогони тесты в logistics\n\n"
+                                         "• прогони тесты в logistics\n"
+                                         "• что там с octopus-multisync (любой объект по имени)\n"
+                                         "• что делали агенты (история и ошибки)\n"
                                          "Кто есть в команде: спроси «какие агенты»"),
                                    correlation=env.get("id"), agent=agent.id)
                 return
@@ -703,7 +786,7 @@ class Runtime:
         # The subject/action travel with the task: the target must investigate THAT process
         # or container, and (for `act`) know which verb was asked for.
         payload = {"handler": handler, "facts_handler": facts_with}
-        for key in ("subject", "action", "what"):
+        for key in ("subject", "action", "what", "confirm", "days"):
             if decision_args.get(key):
                 payload[key] = decision_args[key]
         await self.publish(nc, channel=None, to=target, kind="task",

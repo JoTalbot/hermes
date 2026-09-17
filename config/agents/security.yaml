@@ -96,6 +96,9 @@ bus:
     updates:
       run: bash /opt/hermes/agents/checks/security-updates.sh
       timeout: 180
+    lookup:
+      run: bash /opt/hermes/agents/checks/lookup.sh
+      timeout: 180
     ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

@@ -2,6 +2,8 @@
 # Статус проекта: путь, git, сервисы, контейнеры, свежие изменения. Read-only.
 # Переменные приходят из YAML агента: PROJECT_SLUG, PROJECT_PATH, PROJECT_REPO, PROJECT_SERVICE.
 source "$(dirname "${BASH_SOURCE[0]}")/lib/report.sh"
+# shellcheck source=lib/journal.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/journal.sh"
 SLUG="${PROJECT_SLUG:-project}"
 PATH_="${PROJECT_PATH:-}"
 SERVICES="${PROJECT_SERVICE:-}"
@@ -71,6 +73,14 @@ if command -v docker >/dev/null; then
       case "$s" in Up*) printf '  ✅ %-34s %s\n' "$n" "$s" ;; *) printf '  ⛔ %-34s %s\n' "$n" "$s" ;; esac
     done
   fi
+fi
+
+# Журнал проекта: «что тут уже делали». Читается, но НЕ пишется — статус ничего не меняет.
+JTAIL="$(journal_tail "$SLUG" 5)"
+if [[ -n "$JTAIL" ]]; then
+  report_section "📌 ЧТО БЫЛО С ПРОЕКТОМ"
+  printf '%s\n' "$JTAIL" | cut -c1-150 | sed 's/^/  /'
+  report_proof "tail -5 $(journal_file "$SLUG")"
 fi
 
 ACTIONS=()

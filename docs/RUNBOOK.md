@@ -628,3 +628,38 @@ octopus-browser» is recorded with the actor and the exit code, not just printed
 read) is closed structurally: `lib/report.sh` gained `report_proof "<command>"` — the command a
 claim came from — and `report_unknown "<what could not be read>"`, so "I could not look" is a
 first-class answer instead of an empty report. `project-check.sh` already cites its git commands.
+
+## Batch of 2026-09-17: journal, lookup, scoped actions, telemetry, digest
+
+Everything the owner asked for in one pass, each piece with a gate in `tests/run.sh`.
+
+**Journal.** `journal_write <slug> <kind> <text>` (agents/checks/lib/journal.sh) appends one line to
+`memory/projects/<slug>/JOURNAL.md`; `journal_slug_for <unit|container|path>` maps a name back to its
+project. Only things that change state write (act.sh, project-run.sh); status reports read. The
+project report now ends with «📌 ЧТО БЫЛО С ПРОЕКТОМ», so "why was liza touched yesterday" is one
+answer away. `scripts/install-journal.sh --check` keeps all 21 journals present.
+
+**Lookup.** `bash agents/checks/lookup.sh` with `ARG_NAME=<name>` searches systemd units, containers,
+processes, project configs, listening ports and directories, and ends with the journal lines for that
+name. routing.py sends any untyped object name there («что там с octopus-multisync»).
+
+**Scoped actions.** act.sh gained `rotate-logs`, `backup-now`, `clean-old-logs <days>`; the last two
+refuse to run without «подтверждаю …» (the confirmation travels through routing as ARG_CONFIRM).
+`verify-action.sh` re-checks the object afterwards — the executor is no longer the only witness.
+
+**Telemetry.** Every agent run is in `history.jsonl`; `ask` records additionally carry tier/model/
+fallback, so a degraded balancer is visible instead of merely being slower. Metrics:
+`hermes_model_requests_1h`, `hermes_model_fallbacks_1h`, `hermes_model_latency_p95_ms`,
+`hermes_queue_wait_p95_ms`. Alerts: `HermesAgentFailing`, `HermesModelFallbackStorm`,
+`HermesQueueBacklog`.
+
+**Queue.** Interactive and background tasks use separate semaphores (2 / 1); if any task waits more
+than 120 s the owner gets one message saying so.
+
+**Digest.** `bash scripts/install-digest.sh` installs `hermes-digest.timer` (09:00, persistent) which
+runs `scripts/hermes-digest.py`: the 10–15 line summary (agents, alerts, projects, backup, queue)
+delivered through the same Telegram channel as the alerts. `--test` sends it now.
+
+**Skills.** `bash scripts/audit-skills.sh` inventories every SKILL.md under /opt/hermes/skills and
+/root/agents, reports duplicate titles and full copies, and flags skills with no declared capability
+or bounds. It never deletes anything: 260 skills are somebody's work and the decision is the owner's.

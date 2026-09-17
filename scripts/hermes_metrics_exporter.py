@@ -579,9 +579,68 @@ def probe_agent_history() -> list[str]:
     return out
 
 
+def probe_model_telemetry() -> list[str]:
+    """Какие тиры моделей отвечают, как часто срываются и сколько ждёт очередь.
+
+    Разбирается та же история прогонов, что пишет runtime: записи с handler=ask несут
+    tier/model/fallback/latency, фоновые прогоны — queue_ms. До этого деградация балансера
+    была невидима: система продолжала отвечать, просто дороже и медленнее.
+    """
+    path = os.environ.get("HERMES_HISTORY_FILE", "/var/lib/hermes-agents/history.jsonl")
+    out = [
+        "# HELP hermes_model_requests_1h Model requests per tier in the last hour",
+        "# TYPE hermes_model_requests_1h gauge",
+        "# HELP hermes_model_fallbacks_1h Requests a tier could not answer (fallback to local)",
+        "# TYPE hermes_model_fallbacks_1h gauge",
+        "# HELP hermes_model_latency_p95_ms 95th percentile model latency per tier",
+        "# TYPE hermes_model_latency_p95_ms gauge",
+        "# HELP hermes_queue_wait_p95_ms 95th percentile queue wait before a handler started",
+        "# TYPE hermes_queue_wait_p95_ms gauge",
+    ]
+    now = time.time()
+    tiers: dict[str, dict] = {}
+    queue: list[int] = []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                epoch = int(r.get("epoch") or 0)
+                if r.get("queue_ms"):
+                    queue.append(int(r["queue_ms"]))
+                if r.get("handler") != "ask":
+                    continue
+                tier = str(r.get("tier") or "?")
+                t = tiers.setdefault(tier, {"n": 0, "fb": 0, "lat": []})
+                t["lat"].append(int(r.get("took_ms") or 0))
+                if now - epoch <= 3600:
+                    t["n"] += 1
+                    if r.get("fallback"):
+                        t["fb"] += 1
+    except OSError:
+        return out
+    for tier, t in sorted(tiers.items()):
+        lbl = '{tier="%s"}' % tier.replace('"', '')
+        d = sorted(t["lat"])
+        p95 = d[max(0, min(len(d) - 1, int(round(0.95 * (len(d) - 1)))))] if d else 0
+        out.append(f"hermes_model_requests_1h{lbl} {t['n']}")
+        out.append(f"hermes_model_fallbacks_1h{lbl} {t['fb']}")
+        out.append(f"hermes_model_latency_p95_ms{lbl} {p95}")
+    if queue:
+        q = sorted(queue)
+        out.append("hermes_queue_wait_p95_ms "
+                   f"{q[max(0, min(len(q) - 1, int(round(0.95 * (len(q) - 1)))))]}")
+    return out
+
+
 PROBES = (probe_units, probe_host_pressure, probe_shim, probe_balancer, probe_agents, probe_bus,
           probe_github, probe_tailscale, probe_agent_bus, probe_bus_agents,
-          probe_projects, probe_agent_history)
+          probe_projects, probe_agent_history, probe_model_telemetry)
 
 
 class Handler(BaseHTTPRequestHandler):

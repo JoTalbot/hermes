@@ -99,6 +99,12 @@ bus:
         PROJECT_PATH: "/opt/octopus-browser"
         PROJECT_REPO: "https://github.com/JoTalbot/browser"
         PROJECT_SERVICE: "octopus-browser-aios-adapter.service octopus-browser.service"
+    lookup:
+      run: bash /opt/hermes/agents/checks/lookup.sh
+      timeout: 180
+    history:
+      run: bash /opt/hermes/agents/checks/history.sh
+      timeout: 180
     ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

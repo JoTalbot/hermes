@@ -93,5 +93,11 @@ bus:
     dispatch: {}          # runtime built-in
     agents: {}          # runtime built-in
     ask: {}          # runtime built-in
+    lookup:
+      run: bash /opt/hermes/agents/checks/lookup.sh
+      timeout: 180
+    history:
+      run: bash /opt/hermes/agents/checks/history.sh
+      timeout: 180
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

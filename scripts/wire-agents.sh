@@ -76,6 +76,8 @@ CORE = {
                   "pending": f"bash {CHECKS}/orchestrator-pending.sh",
                   "skills": f"bash {CHECKS}/orchestrator-skills.sh",
                   "dispatch": None, "agents": None, "ask": None,
+                  "lookup": f"bash {CHECKS}/lookup.sh",
+                  "history": f"bash {CHECKS}/history.sh",
                   "identity": None, "ping": None}),
     "server-guardian": dict(
         purpose="Здоровье узла: systemd, docker, диск, память, загрузка, журнал ошибок.",
@@ -90,6 +92,9 @@ CORE = {
                   "act": f"bash {CHECKS}/act.sh",
                   "services": f"bash {CHECKS}/guardian-services.sh",
                   "hermes": f"bash {CHECKS}/hermes-status.sh",
+                  "lookup": f"bash {CHECKS}/lookup.sh",
+                  "history": f"bash {CHECKS}/history.sh",
+                  "verify": f"bash {CHECKS}/verify-action.sh",
                   "ask": None, "identity": None, "ping": None}),
     "github": dict(
         purpose="GitHub как источник истины: состояние репозиториев, CI, коммиты, "
@@ -98,6 +103,7 @@ CORE = {
         handlers={"status": f"bash {CHECKS}/github-status.sh",
                   "repos": f"bash {CHECKS}/github-repos.sh",
                   "secret-scan": f"bash {REPO}/scripts/secret-scan.sh --worktree",
+                  "lookup": f"bash {CHECKS}/lookup.sh",
                   "ask": None, "identity": None, "ping": None}),
     "security": dict(
         purpose="Безопасность: firewall, выставленные порты, права секретов, "
@@ -107,6 +113,7 @@ CORE = {
                   "ports": f"bash {CHECKS}/security-ports.sh",
                   "secrets": f"bash {CHECKS}/security-secrets.sh",
                   "updates": f"bash {CHECKS}/security-updates.sh",
+                  "lookup": f"bash {CHECKS}/lookup.sh",
                   "ask": None, "identity": None, "ping": None}),
     "monitoring": dict(
         purpose="Наблюдаемость: Prometheus targets, экспортеры, Grafana, правила "
@@ -115,6 +122,7 @@ CORE = {
         handlers={"health": f"bash {CHECKS}/monitoring-health.sh",
                   "alerts": f"bash {CHECKS}/monitoring-alerts.sh",
                   "targets": f"bash {CHECKS}/monitoring-targets.sh",
+                  "lookup": f"bash {CHECKS}/lookup.sh",
                   "ask": None, "identity": None, "ping": None}),
     "backup": dict(
         purpose="Резервные копии и восстановление: свежесть, целостность, "
@@ -123,6 +131,7 @@ CORE = {
         handlers={"status": f"bash {CHECKS}/backup-status.sh",
                   "list": f"bash {CHECKS}/backup-list.sh",
                   "verify": f"bash {CHECKS}/backup-verify.sh",
+                  "lookup": f"bash {CHECKS}/lookup.sh",
                   "ask": None, "identity": None, "ping": None}),
 }
 
@@ -214,6 +223,8 @@ for f in sorted(glob.glob(f"{proj_dir}/*.yaml")):
     # (Makefile/package.json/pytest), поэтому в handler нет подставляемых строк.
     h = {"status": {"run": f"bash {CHECKS}/project-check.sh", "env": env},
          "run": {"run": f"bash {CHECKS}/project-run.sh", "env": env, "timeout": 420},
+         "lookup": f"bash {CHECKS}/lookup.sh",
+         "history": f"bash {CHECKS}/history.sh",
          "ask": None,
          "identity": None, "ping": None}
     purpose = (f"Project agent для {slug}: {path or 'путь не найден'} "

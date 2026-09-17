@@ -98,6 +98,12 @@ bus:
         PROJECT_PATH: "/home/ubuntu/batch18-oci"
         PROJECT_REPO: "https://github.com/JoTalbot/words"
         PROJECT_SERVICE: "words-tunnel.service"
+    lookup:
+      run: bash /opt/hermes/agents/checks/lookup.sh
+      timeout: 180
+    history:
+      run: bash /opt/hermes/agents/checks/history.sh
+      timeout: 180
     ask: {}          # runtime built-in
     identity: {}          # runtime built-in
     ping: {}          # runtime built-in

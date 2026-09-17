@@ -9,6 +9,7 @@ set -uo pipefail
 # /root) turned every gate into "no such file" — 25 red lines that described the caller's
 # cwd, not the code.
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$PWD"
 PASS=0; FAIL=0; SKIP=0
 ck(){ local name="$1" want="$2" got="$3"
   if [[ "$got" == *"$want"* ]]; then echo "  ok   $name"; PASS=$((PASS+1))
@@ -333,6 +334,7 @@ else
   ((SKIP++)); echo "  ~ nodecfg backup check skipped (бэкап ещё не делался здесь)"
 fi
 echo "[15] agents remember their runs and show their evidence"
+cd "$REPO_ROOT"
 ck "report.sh carries the evidence convention" "report_proof()" \
    "$(grep -o 'report_proof()' agents/checks/lib/report.sh | head -1)"
 ck "report.sh can say «посмотреть не удалось»" "report_unknown()" \
@@ -372,6 +374,90 @@ if [[ -n "$AG1" ]]; then
 else
   ((SKIP++)); ((SKIP++)); ((SKIP++)); echo "  ~ live history checks skipped (агентов в этом чекауте нет)"
 fi
+
+
+echo "[16] everything done in this batch: journal, lookup, scoped actions, model telemetry"
+cd "$REPO_ROOT"
+ck "journal lib writes per-project events" "journal_write()" \
+   "$(grep -o 'journal_write()' agents/checks/lib/journal.sh | head -1)"
+ck "journal lib maps an object name back to its project" "journal_slug_for()" \
+   "$(grep -o 'journal_slug_for()' agents/checks/lib/journal.sh | head -1)"
+ck "status reads the journal and never writes it" "ЧТО БЫЛО С ПРОЕКТОМ" \
+   "$(grep -o 'ЧТО БЫЛО С ПРОЕКТОМ' agents/checks/project-check.sh | head -1)"
+ck "a project run records its outcome" 'journal_write "$SLUG" run' \
+   "$(grep -o 'journal_write \"\$SLUG\" run' agents/checks/project-run.sh | head -1)"
+ck "install-journal is idempotent (--check mode)" "JOURNAL: OK" \
+   "$(grep -o 'JOURNAL: OK' scripts/install-journal.sh | head -1)"
+ck "lookup searches the unit registry" "ЮНИТ SYSTEMD" \
+   "$(grep -o 'ЮНИТ SYSTEMD' agents/checks/lookup.sh | head -1)"
+ck "lookup says so when an object does not exist" "report_unknown" \
+   "$(grep -o 'report_unknown' agents/checks/lookup.sh | head -1)"
+ck "routing sends an untyped object name to lookup" 'handler="lookup"' \
+   "$(grep -o 'handler="lookup"' agents/routing.py | head -1)"
+ck "routing keeps system words out of lookup" "SYSTEM_WORDS" \
+   "$(grep -o 'SYSTEM_WORDS' agents/routing.py | head -1)"
+ck "the octopus/top routing bug stays fixed" '\btop\b' \
+   "$(grep -o -F '\btop\b' agents/routing.py | head -1)"
+ck "irreversible actions need explicit confirmation" "need_confirm" \
+   "$(grep -o 'need_confirm' agents/checks/act.sh | head -1)"
+ck "confirmation reaches act.sh through routing" '"confirm", "days"' \
+   "$(grep -o '"confirm", "days"' agents/routing.py | head -1)"
+ck "backup-now is an allowed verb" "backup-now)" \
+   "$(grep -o 'backup-now)' agents/checks/act.sh | head -1)"
+ck "clean-old-logs deletes only old agent logs" "mtime +\"\$DAYS\"" \
+   "$(grep -o 'mtime +"\$DAYS"' agents/checks/act.sh | head -1)"
+ck "verify-action re-checks the object afterwards" "ВЕРДИКТ" \
+   "$(grep -o 'ВЕРДИКТ' agents/checks/verify-action.sh | head -1)"
+ck "runtime keeps a separate queue for background runs" "MAX_BACKGROUND" \
+   "$(grep -o 'MAX_BACKGROUND' agents/runtime.py | head -1)"
+ck "runtime tells the owner when a task waits too long" "ещё в очереди" \
+   "$(grep -o 'ещё в очереди' agents/runtime.py | head -1)"
+ck "model telemetry records the tier and the fallback" '"tier": model' \
+   "$(grep -o '"tier": model' agents/runtime.py | head -1)"
+ck "the exporter exposes per-tier model metrics" "hermes_model_requests_1h" \
+   "$(grep -o 'hermes_model_requests_1h' scripts/hermes_metrics_exporter.py | head -1)"
+ck "silent model degradation fires an alert" "HermesModelFallbackStorm" \
+   "$(grep -o 'HermesModelFallbackStorm' deploy/monitoring/hermes-agents.rules.yml | head -1)"
+ck "digest covers agents, alerts, projects, backup" "ЗА СУТКИ" \
+   "$(grep -o 'ЗА СУТКИ' agents/checks/digest.sh | head -1)"
+ck "digest is delivered through the existing telegram channel" "import bus_bridge" \
+   "$(grep -o 'import bus_bridge' scripts/hermes-digest.py | head -1)"
+ck "digest has a timer and a check mode" "DIGEST: OK" \
+   "$(grep -o 'DIGEST: OK' scripts/install-digest.sh | head -1)"
+ck "skills audit finds duplicates without deleting anything" "дубли" \
+   "$(grep -o 'дубли' scripts/audit-skills.sh | head -1)"
+ck "wiring gives every agent the lookup handler" "lookup.sh" \
+   "$(grep -o 'lookup.sh' scripts/wire-agents.sh | head -1)"
+ck "the installer wires journal and digest on a new node" "install-journal.sh install-digest.sh" \
+   "$(grep -o 'install-journal.sh install-digest.sh' scripts/install-agent-runtime.sh | head -1)"
+
+LKUPDIR="$(mktemp -d)"; mkdir -p "$LKUPDIR/bin"
+cat > "$LKUPDIR/bin/systemctl" <<'SYSEOF'
+#!/usr/bin/env bash
+# Заглушка отвечает ТОЛЬКО про hermes-digest. Первая версия отвечала «юнит существует» на
+# любое имя — и проверка «неизвестное имя честно не находится» падала на собственной заглушке.
+case " $* " in
+  *hermes-digest*)
+    case " $* " in
+      *" list-unit-files "*) echo "hermes-digest.timer enabled" ;;
+      *" is-active "*)       echo "active" ;;
+      *" is-enabled "*)      echo "enabled" ;;
+      *) echo "" ;;
+    esac ;;
+  *) echo "" ;;
+esac
+SYSEOF
+chmod +x "$LKUPDIR/bin/systemctl"
+OUT4="$(PATH="$LKUPDIR/bin:$PATH" ARG_NAME=hermes-digest bash agents/checks/lookup.sh 2>&1)"
+ck "live: lookup finds a unit by name" "ЧТО ТАКОЕ hermes-digest" \
+   "$(printf '%s' "$OUT4" | head -1 | grep -o 'ЧТО ТАКОЕ hermes-digest' | head -1)"
+ck "live: lookup reports the unit state" "состояние" "$(printf '%s' "$OUT4" | grep -o 'состояние' | head -1)"
+ck "live: lookup cites its evidence" "доказательство" "$(printf '%s' "$OUT4" | grep -o 'доказательство' | head -1)"
+OUT5="$(PATH="$LKUPDIR/bin:$PATH" ARG_NAME=no-such-object-xyz bash agents/checks/lookup.sh 2>&1)"
+ck "live: an unknown name is answered honestly" "нет ничего с именем" "$(printf '%s' "$OUT5" | grep -o 'нет ничего с именем' | head -1)"
+OUT6="$(ARG_ACTION=clean-old-logs ARG_DAYS=30 bash agents/checks/act.sh 2>&1)"
+ck "live: an irreversible action refuses without confirmation" "нужно подтверждение" "$(printf '%s' "$OUT6" | grep -o 'нужно подтверждение' | head -1)"
+rm -rf "$LKUPDIR"
 
 
 echo

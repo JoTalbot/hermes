@@ -16,6 +16,8 @@
 # Переменные: PROJECT_SLUG, PROJECT_PATH, PROJECT_REPO, PROJECT_SERVICE, PROJECT_CONTAINERS,
 #             PROJECT_DEPLOY (из YAML агента), ARG_WHAT (tests|build|lint|logs|deploy-check).
 source "$(dirname "${BASH_SOURCE[0]}")/lib/report.sh"
+# shellcheck source=lib/journal.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/journal.sh"
 
 SLUG="${PROJECT_SLUG:-project}"
 P_="${PROJECT_PATH:-}"
@@ -291,13 +293,16 @@ report_kv "код возврата" "$RC"
 report_kv "время" "${TOOK} с"
 if (( RC == 0 )); then
   report_ok "${TITLE}: успешно"
+  journal_write "$SLUG" run "${TITLE}: успешно (${TOOK} с)"
   report_footer "ничего делать не нужно — результат выше"
 elif (( RC == 124 )); then
   report_bad "${TITLE}: не уложилось в ${RUN_TIMEOUT} с и было остановлено"
+  journal_write "$SLUG" incident "${TITLE}: таймаут ${RUN_TIMEOUT} с"
   report_footer "похоже, ${SLUG} ждёт внешний ресурс: проверить, что ${WHAT} не требует сети" \
                 "таймаут можно поднять в config/agents/projects/${SLUG}.yaml"
 else
   report_bad "${TITLE}: ошибка (код $RC)"
+  journal_write "$SLUG" incident "${TITLE}: код $RC в ${TOOK} с"
   FAILED_LINE="$(printf '%s\n' "$OUT" | grep -m1 -iE 'fail|error|ошибк' | cut -c1-120)"
   [[ -n "$FAILED_LINE" ]] && report_info "первое сообщение об ошибке: ${FAILED_LINE}"
   report_footer "разобрать последние строки выше — это вывод самого проекта, не агента" \

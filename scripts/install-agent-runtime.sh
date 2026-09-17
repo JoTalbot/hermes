@@ -74,8 +74,10 @@ echo "install-agent-runtime.sh done."
 
 # ---- config gaps that used to fail silently ----
 # models.yaml: without it agents quietly run on built-in defaults; logrotate: without it the
-# agent logs grow forever (FACT 2026-09-17: 23 files, no rules).
-for s in install-model-policy.sh install-logrotate.sh install-git-safety.sh; do
+# agent logs grow forever (FACT 2026-09-17: 23 files, no rules); journal: without it a project
+# has no memory of what was done to it; digest: without it the owner gets no daily summary.
+for s in install-model-policy.sh install-logrotate.sh install-git-safety.sh \
+         install-journal.sh install-digest.sh; do
   # if/then, а не «[[ ]] && ...»: под set -e ложное условие в конце цикла завершает скрипт
   if [[ -x "$REPO_DIR/scripts/$s" ]]; then
     bash "$REPO_DIR/scripts/$s" || echo "  WARNING: $s reported a problem (see above)"

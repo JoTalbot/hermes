@@ -97,7 +97,8 @@ MAIN_KEYBOARD = {
 }
 
 # Buttons that ARE tasks: the label is a shortcut, the task text is what humans would write.
-BUTTON_TASKS = {"сервер": "проверить загрузку сервера", "бэкап": "проверить бэкапы"}
+BUTTON_TASKS = {"сервер": "проверить загрузку сервера", "бэкап": "проверить бэкапы",
+                "история": "что делали агенты", "очередь": "что делали агенты"}
 BUTTON_META = {"агенты": "agents", "проекты": "projects", "статус": "status",
                "сводка": "digest", "узлы": "servers", "помощь": "help"}
 

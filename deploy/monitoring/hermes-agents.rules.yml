@@ -161,3 +161,26 @@ groups:
             but nothing counted them, so an agent could break and stay broken. The run
             history lists each failure with its exit code and log file — `bash
             agents/checks/history.sh` (or «что делали агенты» in Telegram) shows them."
+
+      - alert: HermesModelFallbackStorm
+        expr: sum(hermes_model_fallbacks_1h) >= 3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} model requests had to fall back in the last hour"
+          description: "A tier stopped answering and the agents degraded (local model, then
+            facts only). The owner may still be getting answers — which is exactly why this
+            must be visible: quality drops silently, cost and latency rise. Check the
+            balancer and tier health, then `bash agents/checks/history.sh` for the tiers."
+
+      - alert: HermesQueueBacklog
+        expr: hermes_queue_wait_p95_ms > 120000
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Tasks wait over two minutes before a handler starts"
+          description: "Background runs are not supposed to hold the owner's questions. If
+            the p95 wait stays above two minutes, either a project run is stuck or the
+            concurrency is too low for this node."

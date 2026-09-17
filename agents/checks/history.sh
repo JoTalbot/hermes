@@ -111,6 +111,27 @@ for name, a in sorted(fails, key=lambda kv: -kv[1]["last_fail"])[:5]:
 if not fails:
     print("   проблемных прогонов в окне не было")
 
+# Модели: какой тир отвечал, сколько раз не ответил и сорвался ли на локальную модель.
+# Без этой строки деградация балансера была невидима: ответы шли, просто дороже и медленнее.
+models = defaultdict(lambda: {"n": 0, "fallback": 0, "names": defaultdict(int), "lat": []})
+for r in window:
+    if r.get("handler") != "ask":
+        continue
+    tier = str(r.get("tier") or "?")
+    m = models[tier]
+    m["n"] += 1
+    m["lat"].append(int(r.get("took_ms") or 0))
+    if r.get("fallback"):
+        m["fallback"] += 1
+    m["names"][str(r.get("model") or "?")] += 1
+if models:
+    print("\n🧠 МОДЕЛИ (по тирам)")
+    for tier, m in sorted(models.items(), key=lambda kv: -kv[1]["n"]):
+        top = max(m["names"].items(), key=lambda kv: kv[1])[0] if m["names"] else "?"
+        print(f"  {tier:<16} запросов {m['n']:<4} без ответа {m['fallback']:<3} "
+              f"p95 {pct(m['lat'], 95)}мс · модель {top}")
+    print(f"  ↳ доказательство: {path} (поля tier/model/fallback у записей ask)")
+
 print("\n💡 ЧТО ДЕЛАТЬ")
 if fails:
     print("  • открыть журнал из строки выше — там весь вывод и код возврата")

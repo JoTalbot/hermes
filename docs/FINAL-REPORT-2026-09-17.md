@@ -63,3 +63,28 @@
 4. **Плановая ротация и проверка бэкапа в Telegram**: раз в сутки «бэкап 71 MiB, проверен, восстановление PLAUSIBLE» — чтобы RECOVERY не зависел от того, что кто-то заглянет в `/var/backups`.
 5. **Второй настоящий сервер** (не контейнер) — MULTI-SERVER останется «PASS с оговоркой», пока федерация живёт только на шинных узлах одного хоста.
 6. **Метрика «сколько владелец ждал ответа»** (p50/p95 по задачам) — прямое измерение того, что для вас важно в чате.
+
+## Batch after the report (same day, one pass)
+
+The owner asked for the whole improvement plan at once. Delivered on the same node, with gates:
+
+1. **Agents remember their runs** — `history.jsonl` + `agents/checks/history.sh`, model tier and
+   fallback per `ask`, `HermesAgentFailing` alert. Before: an agent failing on every run looked healthy.
+2. **Evidence in reports** — `report_proof` / `report_unknown`; the class of bug that produced 14
+   false "clean tree" reports is now closed structurally.
+3. **Project journal** — every project has a JOURNAL.md; status shows the last five events.
+4. **Lookup by name** — «что там с octopus-multisync» answers about that unit, not about the host.
+5. **Scoped actions with confirmation** — backup/cleanup refuse until the owner says «подтверждаю …»;
+   `verify-action.sh` re-checks the result afterwards.
+6. **Model telemetry** — tiers, fallbacks and latency per tier in metrics and in the history report.
+7. **Priorities** — background runs cannot hold the owner's questions; long waits are announced.
+8. **Daily digest 09:00** — first one delivered (message_id=187).
+9. **Skills audit** — 260 SKILL.md inventoried: 4 duplicate titles, 12 full copies, none deleted.
+
+Verification: `tests/run.sh` **194 passed · 0 failed · 0 skipped**, `agents-selftest` 51/0,
+JOURNAL/DIGEST/GIT-SAFETY/PROTECTION/ALERTING all OK, wiring in sync (27 agents), 19 alert rules live.
+
+Six real bugs were found and fixed on the way — the routing pattern `top` matching "oc**top**us",
+`pgrep -f` matching the check's own process, the digest's alert section failing inside an f-string,
+the digest importing the bus differently from the alert poller, two test-suite defects (relative paths
+after other sections changed directory; a stub that claimed every unit existed).

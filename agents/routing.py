@@ -47,8 +47,10 @@ INTENT_RULES: list[tuple[str, str, str, str]] = [
     # flows into `ask` so the answer explains what the numbers mean.
     (r"что с процесс|процесс|процессы|жр[её]т|ест cpu|ест память|утечк", "host-health",
      "процесс", "proc"),
-    (r"что грузит|кто грузит|что ест|жр[её]т|топ процесс|top|процессор|cpu|загрузк|нагрузк|"
-     r"load|тормоз|лаг|тяжел|тяжёл", "host-health", "загрузка CPU", "top"),
+    # FACT (2026-09-17): шаблон `top` без границ матчил «ocTOPus» — вопрос про octopus
+    # уезжал в отчёт о загрузке CPU. Короткие латинские слова теперь с границами слова.
+    (r"что грузит|кто грузит|что ест|жр[её]т|топ процесс|\btop\b|процессор|\bcpu\b|загрузк|нагрузк|"
+     r"\bload\b|тормоз|лаг|тяжел|тяжёл", "host-health", "загрузка CPU", "top"),
     (r"диск|место|df|inode|забит|переполн", "host-health", "диски", "disk"),
     (r"контейнер|докер|docker", "host-health", "контейнеры", "docker"),
     (r"логи|журнал|ошибк|error|падени|crash", "host-health", "журналы", "logs"),
@@ -132,9 +134,16 @@ ACTION_RULES: list[tuple[str, str, str]] = [
     (r"prune|почист[аи] docker|убери образ|освободи место в docker", "prune-images",
      "очистка docker"),
     (r"vacuum|почист[аи] журнал|сжать журнал", "vacuum-journal", "сжатие журнала"),
+    (r"сделай бэкап|создай бэкап|backup now|запусти бэкап", "backup-now", "резервная копия"),
+    (r"ротаци[яю] логов|проверни логи|rotate logs", "rotate-logs", "ротация журналов"),
+    (r"почист[аи] старые логи|удали старые логи|clean-old-logs", "clean-old-logs",
+     "чистка старых журналов"),
 ]
 
 ACTION_OBJECTS = (r"контейнер|container|сервис|юнит|unit|демон|служб|том|volume")
+
+# «подтверждаю перезапусти сервис X» — явное согласие владельца на действие, меняющее данные.
+CONFIRM_CUES = (r"^\s*подтвержда|^\s*да,\s*подтвержда|^\s*confirm")
 
 
 def parse_action(task: str) -> dict:
@@ -148,8 +157,16 @@ def parse_action(task: str) -> dict:
     if not verb:
         return {}
     target = subject(task)
-    if verb in ("prune-images", "vacuum-journal"):
+    # Чистка без объекта применяется к узлу целиком; параметр срока, если назван.
+    if verb in ("prune-images", "vacuum-journal", "rotate-logs"):
         return {"action": verb, "target": "", "why": kind}
+    if verb == "backup-now":
+        return {"action": verb, "target": "", "why": kind,
+                "confirm": "yes" if re.search(CONFIRM_CUES, task, re.I) else "no"}
+    if verb == "clean-old-logs":
+        days = re.search(r"(\d{1,3})\s*(?:дн|day)", low)
+        return {"action": verb, "target": "", "why": kind, "days": days.group(1) if days else "30",
+                "confirm": "yes" if re.search(CONFIRM_CUES, task, re.I) else "no"}
     if not target:
         return {}
     if verb in ("restart", "start") and not re.search(ACTION_OBJECTS, low):
@@ -157,6 +174,10 @@ def parse_action(task: str) -> dict:
         return {}
     return {"action": verb, "target": target, "why": f"{kind} «{target}»"}
 
+
+# Слова о самой системе: «статус hermes» — это стек Hermes, а не объект с именем hermes.
+SYSTEM_WORDS = {"hermes", "docker", "systemd", "nginx", "nats", "ssh", "prometheus", "grafana",
+                "postgres", "node", "server", "сервер", "alerts", "cursor"}
 
 META_AGENTS = (r"какие агент|список агент|агенты и их|кто умеет|что ты умеешь|что умеешь|"
                r"кто есть в команде|состав команды|какие функции|кто может|моя команда")
@@ -177,7 +198,8 @@ def route(task: str, agents: dict) -> dict:
     if act:
         out.update(capability="host-health", handler="act", why=act["why"],
                    facts_handler="docker")
-        out.update({k: v for k, v in act.items() if k in ("action", "target")})
+        out.update({k: v for k, v in act.items()
+                    if k in ("action", "target", "confirm", "days")})
         return out
 
     # A named process/container/service is a specific subject: investigate THAT, don't print
@@ -205,6 +227,17 @@ def route(task: str, agents: dict) -> dict:
     if re.search(META_PROJECTS, low):
         out.update(target="orchestrator", handler="projects", why="вопрос о проектах")
         return out
+
+    # 0. имя объекта без слова «сервис/контейнер/процесс»: «что там с octopus-multisync».
+    #    Проверяется раньше проектов, иначе «octopus-multisync» был бы принят за проект
+    #    octopus (частичное совпадение), и вместо карточки юнита пришёл бы отчёт проекта.
+    cand = subject(task)
+    known_projects = {c.split(":", 1)[1] for c in caps if c.startswith("project:")}
+    if (cand and cand not in agents and cand not in known_projects
+            and cand not in SYSTEM_WORDS and len(cand) > 3):
+        out.update(capability="host-health", handler="lookup", facts_handler="lookup",
+                   why=f"объект «{cand}»", subject=cand)
+        return _finish(out, low)
 
     # 1. a project named in the task is the most specific signal
     projects = sorted(((c, c.split(":", 1)[1]) for c in caps if c.startswith("project:")),
