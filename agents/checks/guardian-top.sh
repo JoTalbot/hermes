@@ -5,7 +5,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/report.sh"
 report_header "🔥 ЧТО ГРУЗИТ СЕРВЕР"
 
 CORES=$(nproc)
-read -r LOAD1 LOAD5 LOAD15 < /proc/loadavg
+# /proc/loadavg has five fields and `read` would stuff the remainder into the last
+# variable (making the load line read "11.07 11.64 11.81 10/1604 3518557"), so parse it
+# with awk and take exactly what each line needs.
+read -r LOAD1 LOAD5 LOAD15 < <(awk '{print $1, $2, $3}' /proc/loadavg)
 read -r RUNNING TOTALP < <(awk '{split($4,a,"/"); print a[1], a[2]}' /proc/loadavg)
 RATIO=$(awk -v l="$LOAD1" -v c="$CORES" 'BEGIN{printf "%.1f", l/c}')
 

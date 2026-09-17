@@ -3,7 +3,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/lib/report.sh"
 report_header "🖥 СОСТОЯНИЕ УЗЛА"
 
-read -r LOAD1 _ < /proc/loadavg; CORES=$(nproc)
+read -r LOAD1 < <(awk '{print $1}' /proc/loadavg); CORES=$(nproc)
 read -r TOTAL USED AVAIL < <(free -m | awk '/Mem:/{print $2, $3, $7}')
 SW_T=$(free -m | awk '/Swap:/{print $2}'); SW_U=$(free -m | awk '/Swap:/{print $3}')
 UP_S=$(cut -d. -f1 /proc/uptime)
