@@ -181,6 +181,14 @@ def probe_balancer() -> list[str]:
         "# TYPE hermes_llm_providers gauge",
         "# HELP hermes_llm_providers_unhealthy Providers currently reporting unhealthy",
         "# TYPE hermes_llm_providers_unhealthy gauge",
+        "# HELP hermes_llm_provider_healthy 1 if this provider is healthy, 0 if not",
+        "# TYPE hermes_llm_provider_healthy gauge",
+        "# HELP hermes_llm_provider_keys API keys configured for this provider",
+        "# TYPE hermes_llm_provider_keys gauge",
+        "# HELP hermes_llm_tier_healthy_providers Healthy providers per tier",
+        "# TYPE hermes_llm_tier_healthy_providers gauge",
+        "# HELP hermes_llm_cache_size Answers held in the balancer cache (tier-blind key)",
+        "# TYPE hermes_llm_cache_size gauge",
     ]
     try:
         d = _get_json(BRIDGE_URL + "/health")
@@ -189,10 +197,19 @@ def probe_balancer() -> list[str]:
         out.append("hermes_llm_balancer_up 1")
         out.append(f"hermes_llm_providers {len(provs)}")
         out.append(f"hermes_llm_providers_unhealthy {bad}")
+        out.append(f"hermes_llm_cache_size {int((d.get('llm_balancer') or {}).get('cache_size') or 0)}")
+        tiers: dict[str, int] = {}
         for p in provs:
-            name = str(p.get("name", "?"))
-            out.append(f'hermes_llm_provider_healthy{{provider="{name}",tier="{p.get("tier","?")}"}} '
-                       f'{1 if p.get("healthy") else 0}')
+            name = str(p.get("name", "?")).replace('"', "")
+            tier = str(p.get("tier", "?")).replace('"', "")
+            out.append(f"hermes_llm_provider_healthy{{provider=\"{name}\",tier=\"{tier}\"}} "
+                       f"{1 if p.get('healthy') else 0}")
+            # FACT (2026-09-17): провайдер без ключа выглядит «здоровым», но ответить не может —
+            # именно так тир code молча обслуживался fast-моделью.
+            out.append(f'hermes_llm_provider_keys{{provider="{name}"}} {int(p.get("keys_count") or 0)}')
+            tiers[tier] = tiers.get(tier, 0) + (1 if p.get("healthy") else 0)
+        for tier, n in sorted(tiers.items()):
+            out.append(f'hermes_llm_tier_healthy_providers{{tier="{tier}"}} {n}')
     except Exception:
         out.append("hermes_llm_balancer_up 0")
     return out
@@ -738,6 +755,7 @@ def probe_project_staleness() -> list[str]:
             except Exception:
                 continue
     return out
+
 
 
 def probe_backup() -> list[str]:

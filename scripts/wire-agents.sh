@@ -88,7 +88,7 @@ CORE = {
                   "identity": None, "ping": None}),
     "server-guardian": dict(
         purpose="Здоровье узла: systemd, docker, диск, память, загрузка, журнал ошибок.",
-        capabilities=["host-health", "services", "docker", "disk", "load", "journal"],
+        capabilities=["host-health", "services", "docker", "disk", "load", "journal", "llm"],
         handlers={"status": f"bash {CHECKS}/guardian-status.sh",
                   "top": f"bash {CHECKS}/guardian-top.sh",
                   "disk": f"bash {CHECKS}/guardian-disk.sh",
@@ -99,6 +99,7 @@ CORE = {
                   "act": f"bash {CHECKS}/act.sh",
                   "services": f"bash {CHECKS}/guardian-services.sh",
                   "hermes": f"bash {CHECKS}/hermes-status.sh",
+                  "models": f"bash {CHECKS}/models.sh",
                   "lookup": f"bash {CHECKS}/lookup.sh",
                   "history": f"bash {CHECKS}/history.sh",
                   "verify": f"bash {CHECKS}/verify-action.sh",

@@ -165,6 +165,35 @@ groups:
       # FACT (2026-09-17): агент просил "умный" тир, а отвечала дешёвая модель. Теперь это
       # измеряется (hermes_model_tier_mismatch_1h) и должно доходить до владельца: потери
       # умности не видны в обычных метриках — ответы приходят, просто не те.
+      # FACT (2026-09-17): у тира code не осталось рабочего провайдера, и это было не видно:
+      # ответы приходили от модели другого тира. Тихий отказ тира — это тихая потеря качества.
+      - alert: HermesLLMTierNoProvider
+        expr: sum by (tier) (hermes_llm_provider_healthy{tier=~"fast|reasoning|code|long_context|local"}) == 0
+        for: 15m
+        labels:
+          severity: warning
+          area: llm
+        annotations:
+          summary: "У тира {{ $labels.tier }} не осталось здоровых провайдеров"
+          description: >-
+            Балансировщик не может ответить моделью этого тира, поэтому запросы уходят к
+            модели другого тира (или к локальному движку). Проверить, кто именно нездоров:
+            curl -s localhost:9600/api/v1/aios/status и bash agents/checks/models.sh.
+            Известные случаи: mistral-small — HTTP 429 (квота ключа); hf-Qwen2.5-72B — нет ключа.
+
+      - alert: HermesLLMHealthUnreachable
+        expr: hermes_llm_balancer_up == 0
+        for: 10m
+        labels:
+          severity: critical
+          area: llm
+        annotations:
+          summary: "Метрики не могут спросить здоровье LLM-провайдеров"
+          description: >-
+            Экспортёр не получил /health балансировщика чаще, чем раз в 10 минут: значит о
+            состоянии провайдеров мы не знаем ничего, а агенты при этом продолжают отвечать.
+            Проверить: systemctl is-active octopus-aios.service, curl -s localhost:9600/health.
+
       - alert: HermesModelTierMismatch
         expr: sum(hermes_model_tier_mismatch_1h) > 2
         for: 10m

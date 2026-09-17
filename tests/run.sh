@@ -532,7 +532,7 @@ ck "core checks now cite their commands" "report_proof" \
 # живое: прогон «понимает ли система вопросы владельца»
 if [[ -x .venv-bus/bin/python ]]; then
   EV="$(bash scripts/eval-agents.sh 2>&1 | tail -1)"
-  ck "live: every sample question reaches the right agent" "20 из 20" "$EV"
+  ck "live: every sample question reaches the right agent" "22 из 22" "$EV"
   OUT7="$(bash agents/checks/journal-top.sh 2>&1 | head -3 | tr '\n' ' ')"
   ck "live: journal-top runs on this node" "КТО ПИШЕТ В ЖУРНАЛ" "$OUT7"
   # Фикстура, а не боевой файл: тест не должен писать в то, что проверяет.
@@ -546,6 +546,8 @@ if [[ -x .venv-bus/bin/python ]]; then
   OUT9="$(bash agents/checks/feedback.sh 2>&1 | tail -1)"
   ck "live: feedback report renders on the node file too" "ИТОГ" "$OUT9"
   rm -rf "$FBDIR"
+  OUTM="$(bash agents/checks/models.sh 2>&1 | tail -1)"
+  ck "live: the models report renders on this node" "ИТОГ" "$OUTM"
 else
   ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); echo "  ~ live eval checks skipped (нет venv шины)"
 fi
@@ -572,6 +574,20 @@ ck "the shim knows which tier each provider belongs to" "provider_tier" \
    "$(grep -o 'provider_tier' deploy/shim/aios_openai_shim.py | head -1)"
 ck "an off-tier provider counts as a mismatch" "provider_off" \
    "$(grep -o 'provider_off' deploy/shim/aios_openai_shim.py | head -1)"
+ck "the exporter asks the balancer about provider health" "probe_balancer" \
+   "$(grep -o 'probe_balancer' scripts/hermes_metrics_exporter.py | head -1)"
+ck "provider health is exported per provider" "hermes_llm_provider_healthy" \
+   "$(grep -o 'hermes_llm_provider_healthy' scripts/hermes_metrics_exporter.py | head -1)"
+ck "a tier with no healthy provider is an alert" "HermesLLMTierNoProvider" \
+   "$(grep -o 'HermesLLMTierNoProvider' deploy/monitoring/hermes-agents.rules.yml | head -1)"
+ck "a silent health endpoint is an alert" "HermesLLMHealthUnreachable" \
+   "$(grep -o 'HermesLLMHealthUnreachable' deploy/monitoring/hermes-agents.rules.yml | head -1)"
+ck "the server agent owns the models report" '"models": f"bash {CHECKS}/models.sh"' \
+   "$(grep -o '"models": f"bash {CHECKS}/models.sh"' scripts/wire-agents.sh | head -1)"
+ck "a question about models reaches that report" '"модели LLM", "models"' \
+   "$(grep -o '"модели LLM", "models"' agents/routing.py | head -1)"
+ck "the digest carries the model line" 'МОДЕЛИ' \
+   "$(grep -o '🧠 МОДЕЛИ' agents/checks/digest.sh | head -1)"
 ck "the exporter exposes tier mismatches" "hermes_model_tier_mismatch_1h" \
    "$(grep -o 'hermes_model_tier_mismatch_1h' scripts/hermes_metrics_exporter.py | head -1)"
 
@@ -617,7 +633,7 @@ PY
     ((SKIP++)); echo "  ~ AIOS bridge check skipped (файла нет на этом хосте)"
   fi
 else
-  ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); echo "  ~ live model telemetry checks skipped (нет venv шины)"
+  ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); echo "  ~ live model telemetry checks skipped (нет venv шины)"
 fi
 
 

@@ -158,16 +158,26 @@ The owner asked for a check of the agents' LLM path. Result: the path works, the
   request without a tier behaves exactly as before. Backup, diff and rollback are in
   `/var/backups/hermes/`; gate [18] fails if the bridge is ever reverted.
 * **Still broken for reasons that need keys or a service, not code:** the **code** tier has no
-  working provider (`mistral-small` returns HTTP 429, `hf-Qwen2.5-72B-Instruct` has no API key and
-  an unresolvable host), so `hermes-code` requests are served by a fast model; and the **local**
+  working provider (`mistral-small` returns HTTP 429 (key quota) and `hf-Qwen2.5-72B-Instruct` has an
+  empty `base_url` in the balancer (its host cannot be called at all)), so `hermes-code` requests are served by a fast model; and the **local**
   tier is down because `ollama` is inactive on the node (`systemctl start ollama` restores it,
   ~2 GB RAM on first use — the owner's call). Both are now visible: `⚠️ ответил не тот тир` in the
   answer and the `HermesModelTierMismatch` alert instead of silence.
 
-**Numbers after this wave:** `tests/run.sh` **248 passed · 0 failed · 0 skipped** (gates [17]
+**Numbers after this wave:** `tests/run.sh` **256 passed · 0 failed · 0 skipped** (gates [17]
 and [18]), Prometheus loads **26 rules** including the new `HermesModelTierMismatch`, and the
 shim's own counters (`llm_served_tier_total`, `llm_tier_mismatch_total`) show which tier served
 each request.
+
+**Second pass, same day: seeing the provider layer.** `agents/checks/models.sh` reports, without
+spending a single model request, what was asked per tier, which provider actually answered, provider
+health and keys from the balancer, and what is missing (ollama off). The exporter's existing
+`probe_balancer` now also exports `hermes_llm_provider_keys`, `hermes_llm_tier_healthy_providers`
+and `hermes_llm_cache_size`; two rules landed (`HermesLLMTierNoProvider`,
+`HermesLLMHealthUnreachable` — a blind exporter used to look exactly like a healthy one); the
+server-guardian agent owns the `models` handler; the digest has a «🧠 МОДЕЛИ» line; and `eval`
+grew to 22 questions (models + providers) — **22 из 22**. `tests/run.sh` **256 passed · 0 failed ·
+0 skipped**, Prometheus **26 rules**.
 
 **Lesson from the batch:** after deploying agent code the unit must be restarted (Python caches
 imports at start); a fixed `routing.py` keeps answering by the old rules otherwise. `hermes-agents`

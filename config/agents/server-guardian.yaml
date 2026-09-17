@@ -94,6 +94,7 @@ bus:
   - disk
   - load
   - journal
+  - llm
   handlers:
     status:
       run: bash /opt/hermes/agents/checks/guardian-status.sh
@@ -124,6 +125,9 @@ bus:
       timeout: 180
     hermes:
       run: bash /opt/hermes/agents/checks/hermes-status.sh
+      timeout: 180
+    models:
+      run: bash /opt/hermes/agents/checks/models.sh
       timeout: 180
     lookup:
       run: bash /opt/hermes/agents/checks/lookup.sh

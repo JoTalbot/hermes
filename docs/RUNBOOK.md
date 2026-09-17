@@ -739,6 +739,37 @@ for the owner, it deletes nothing.
    the live gate could not see the empty state. Both fixed; the live ratings check now runs on a
    fixture and on the node's file.
 
+## Seeing the LLM: which models answer, and who is alive (2026-09-17, second pass)
+
+`bash agents/checks/models.sh` answers «какие модели отвечают» in one command, and it spends no
+model requests: it reads `history.jsonl` plus the balancer's own health. Sections: what was asked
+per tier and how much of it was answered by the same tier (with p95 and cache hits), which
+provider actually served each answer, provider health and key counts from the balancer, what is
+missing right now (ollama off, a tier whose providers are down), and the shim's own counters.
+
+```bash
+bash agents/checks/models.sh                 # отчёт для владельца
+ARG_HOURS=1 bash agents/checks/models.sh     # только последний час
+curl -s localhost:9725/metrics | grep '^hermes_llm_'   # то же, но числами для правил
+```
+
+Telegram/routing: «какие модели отвечают», «какие провайдеры llm живы» → server-guardian,
+handler `models` (declared in scripts/wire-agents.sh, so `wire-agents.sh --check` fails if it ever
+drifts). The 09:00 digest carries a short «🧠 МОДЕЛИ» line: requests, tier mismatches, top
+providers.
+
+Metrics added on top of the existing `probe_balancer` (same names, no duplicates — two functions
+emitting one metric name with different HELP lines make Prometheus drop the whole scrape):
+`hermes_llm_provider_keys{provider}`, `hermes_llm_tier_healthy_providers{tier}`,
+`hermes_llm_cache_size`. Two new rules: `HermesLLMTierNoProvider` (a tier has no healthy provider
+for 15 min) and `HermesLLMHealthUnreachable` (`hermes_llm_balancer_up == 0` for 10 min — before
+this, a blind exporter looked exactly like a healthy one).
+
+**Measured while building this** (so nobody repeats the mistakes): `hf-Qwen2.5-72B-Instruct` HAS a
+key but an empty `base_url` — it can never answer; `mistral-small` answers `HTTP 429` while its
+quota is exhausted; `liza-rpa-gemini-web` and the ollama providers report zero keys. A provider
+marked healthy in `/health` is therefore not proof that it can answer — only a live call is.
+
 ## Which model actually answered (2026-09-17)
 
 The owner asked to check the LLM path of the agents. The path works — the shim is up, the
@@ -794,9 +825,9 @@ bridge fails the tests instead of silently costing smartness.
 **Two tiers are still broken for reasons outside our control** (the telemetry now says so instead
 of hiding it — `⚠️ ответил не тот тир` in the answer, `HermesModelTierMismatch` alert):
 
-* **code** — `mistral-small` answers `HTTP 429 (Rate limited)` and `hf-Qwen2.5-72B-Instruct` has no
-  `HUGGINGFACE_API_KEY` and its host does not resolve (`[Errno -5] No address associated with
-  hostname`). A `hermes-code` request is therefore served by `groq-gpt-oss-20b` (fast tier).
+* **code** — `mistral-small` answers `HTTP 429 (Rate limited)` and `hf-Qwen2.5-72B-Instruct` has an empty
+  `base_url` in the balancer (a key is present, but there is no host to call — `[Errno -5] No
+  address associated with hostname`). A `hermes-code` request is therefore served by `groq-gpt-oss-20b` (fast tier).
   Needs a working key or another code provider in the balancer.
 * **local** — the `ollama` service on this box is inactive, so the local tier returns the
   balancer's boilerplate, which the shim refuses (502) and the agent answers with facts alone.

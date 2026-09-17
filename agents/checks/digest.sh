@@ -163,6 +163,46 @@ PY
   report_proof "tail /var/lib/hermes-agents/feedback.jsonl"
 fi
 
+# ── 3c. модели: кто отвечал и не теряется ли умность ─────────────────────────
+report_section "🧠 МОДЕЛИ"
+HIST_FILE="${HIST:-/var/lib/hermes-agents/history.jsonl}" python3 - <<'PY'
+import json, os, time
+from collections import Counter
+
+path = os.environ["HIST_FILE"]
+now = time.time()
+served = Counter()
+mismatch = 0
+asks = 0
+try:
+    for line in open(path, encoding="utf-8"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if r.get("handler") != "ask" or now - int(r.get("epoch") or 0) > 86400:
+            continue
+        asks += 1
+        if r.get("provider"):
+            served[f"{r['provider']} [{r.get('provider_tier') or r.get('served_tier') or '?'}]"] += 1
+        if r.get("tier_mismatch"):
+            mismatch += 1
+except OSError:
+    pass
+if not asks:
+    print("  за сутки к модели не обращались")
+else:
+    print(f"  запросов к модели {asks} · расхождений тира {mismatch}")
+    for name, n in served.most_common(4):
+        print(f"    • {name} ×{n}")
+    if mismatch:
+        print("    ⚠️ часть ответов дала модель другого тира — подробнее: «какие модели отвечают»")
+PY
+report_proof "tail /var/lib/hermes-agents/history.jsonl (handler=ask)"
+
 # ── 4. бэкап и очередь ────────────────────────────────────────────────────────
 report_section "💾 БЭКАП И ОЧЕРЕДЬ"
 LAST_BK="$(ls -1t /var/backups/hermes/hermes-state-*.tar.gz 2>/dev/null | head -1)"

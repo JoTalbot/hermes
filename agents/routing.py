@@ -40,6 +40,12 @@ INTENT_RULES: list[tuple[str, str, str, str]] = [
     (r"таргет|target|экспорт|скрейп|scrape", "monitoring", "цели Prometheus", "targets"),
     (r"мониторинг|monitoring|prometheus|grafana|метрик|metric|slo|дашборд", "monitoring",
      "мониторинг", "health"),
+    # ── LLM: какие модели отвечают и кто из провайдеров жив ─────────────────
+    # FACT (2026-09-17): правила про модели не существовало, и «какие модели отвечают»
+    # уходило в отчёт о стеке (совпадение «агент»/«шина»), а вопрос про провайдеров —
+    # в общий мониторинг. Проверено на узле: тир code был мёртв, а отчёта об этом не было.
+    (r"как\w+ модел|модел[ьи] отвеч|модел[ьи] агент|провайдер|\bllm\b", "host-health",
+     "модели LLM", "models"),
     # ── a named thing: process / service / container ────────────────────────
     # "Сервер что с процессом chromium" used to fall through to the generic host report,
     # because it contains the word "сервер" and nothing else matched. The name of a process
