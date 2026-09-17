@@ -67,3 +67,38 @@ error = B.should_forward({"kind": "error", "priority": "normal", "node": B.serve
                           "to": "server-guardian"})
 print("forward=%s" % ("ok" if (not dm and channel and error) else
                       f"dm={dm} channel={channel} error={error}"))
+
+# ── the owner's console must ANSWER questions about the team ────────────────
+# Publishing is stubbed so a probe run cannot post to the real bus.
+_calls: list[tuple] = []
+B._publish = lambda ch, kind, txt: (_calls.append((ch, kind, txt)) or f"PUBLISHED:{ch}:{kind}")
+
+
+def answer(text: str) -> str:
+    _calls.clear()
+    return B.handle_owner_text(text)
+
+
+team = answer("Какие агенты есть и их функции")
+print("meta-answered=%s" % ("Моя команда" in team and not _calls))
+print("meta-has-specialists=%s" % ("server-guardian" in team and "backup" in team))
+print("meta-has-projects=%s" % ("Проекты" in team))
+print("meta-projects=%s" % ("Проекты под наблюдением" in answer("какие проекты")))
+
+print("btn-agents=%s" % ("Моя команда" in answer("🤖 Агенты")))
+def publishes_as_task(text: str, expect: str) -> bool:
+    answer(text)
+    return _calls == [("orchestrator", "task", expect)]
+
+
+print("btn-server-is-task=%s" % publishes_as_task("💻 Сервер", "проверить загрузку сервера"))
+print("btn-backup-is-task=%s" % publishes_as_task("💾 Бэкап", "проверить бэкапы"))
+print("free-text-is-task=%s" % publishes_as_task("проверить загрузку сервера",
+                                                 "проверить загрузку сервера"))
+print("keyboard-buttons=%d" % sum(len(row) for row in B.MAIN_KEYBOARD["keyboard"]))
+print("btn-task-map=%s" % B.BUTTON_TASKS.get("сервер"))
+
+# the refusal must stay short and human: the old one dumped every capability token
+rt = (ROOT / "agents" / "runtime.py").read_text()
+print("refusal-friendly=%s" % ("🤔 Не понял" in rt and "Известные возможности" not in rt))
+print("refusal-has-examples=%s" % ("аудит безопасности" in rt and "статус проекта logistics" in rt))

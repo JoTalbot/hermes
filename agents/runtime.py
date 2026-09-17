@@ -54,6 +54,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bus"))
+import roster  # noqa: E402  (same directory: one renderer for chat and bus)
 from bus import (CHANNELS, RPC_PREFIX, SUBJECT_PREFIX, envelope, mirror_local,  # noqa: E402
                  nats_conf, server_id)
 
@@ -512,15 +513,29 @@ class Runtime:
         capability = args.get("capability") or ""
         target = args.get("agent") or ""
         why = ""
+        # "какие агенты есть и их функции" is a question ABOUT the system, not a task for a
+        # specialist. Answering it with "не понял задачу" (and a dump of 30 capability
+        # tokens) is what the owner saw; the answer was on disk the whole time.
+        low_task = task.lower()
+        if re.search(roster.META_AGENTS, low_task):
+            await self.publish(nc, channel=channel or "orchestrator", kind="result",
+                               text=roster.overview(), correlation=env.get("id"), agent=agent.id)
+            return
+        if re.search(roster.META_PROJECTS, low_task):
+            await self.publish(nc, channel=channel or "orchestrator", kind="result",
+                               text=roster.projects(), correlation=env.get("id"), agent=agent.id)
+            return
         if not target and not capability:
             capability, target, why = self.route_by_text(task)
             if not capability and not target:
-                known = ", ".join(sorted(c for c in caps_of(self.agents) if not c.startswith("project:")))
                 await self.publish(nc, channel="orchestrator", kind="error",
-                                   text=f"не понял задачу «{task}» — не нашёл ни проекта, ни "
-                                        f"ключевого слова.\nНапиши точнее, например: "
-                                        f"«проверить диски», «сделать бэкап», «аудит безопасности», "
-                                        f"«статус проекта logistics».\nИзвестные возможности: {known}",
+                                   text=(f"🤔 Не понял: «{task[:120]}»\n\n"
+                                         "Уточни направление — например:\n"
+                                         "• проверить загрузку сервера\n"
+                                         "• сделать бэкап\n"
+                                         "• аудит безопасности\n"
+                                         "• статус проекта logistics\n\n"
+                                         "Кто есть в команде: спроси «какие агенты»"),
                                    correlation=env.get("id"), agent=agent.id)
                 return
         if not target:

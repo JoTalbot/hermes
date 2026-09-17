@@ -163,6 +163,16 @@ ck "owner text is HTML-escaped for Telegram" "escape=&lt;b&gt;x&lt;/b&gt; &amp; 
 ck "forwarded messages carry a readable kind header" "header-has-kind=True" "$CHAT_PROBE"
 ck "multi-line agent output is shown as a monospace block" "body-mono=True" "$CHAT_PROBE"
 ck "internal agent DMs stay off the phone, errors always arrive" "forward=ok" "$CHAT_PROBE"
+ck "a question about the team is answered, not refused" "meta-answered=True" "$CHAT_PROBE"
+ck "the answer names the specialists" "meta-has-specialists=True" "$CHAT_PROBE"
+ck "'какие проекты' is answered too" "meta-projects=True" "$CHAT_PROBE"
+ck "the 📦 Проекты button answers" "btn-agents=True" "$CHAT_PROBE"
+ck "💻 Сервер is a task, not an answer" "btn-server-is-task=True" "$CHAT_PROBE"
+ck "💾 Бэкап is a task too" "btn-backup-is-task=True" "$CHAT_PROBE"
+ck "free text is still a task" "free-text-is-task=True" "$CHAT_PROBE"
+ck "the phone keyboard offers six actions" "keyboard-buttons=6" "$CHAT_PROBE"
+ck "an unparsable task is refused in plain language, without a token dump" "refusal-friendly=True" "$CHAT_PROBE"
+ck "the refusal teaches by example" "refusal-has-examples=True" "$CHAT_PROBE"
 echo
 echo "════ $PASS passed · $FAIL failed · $SKIP skipped ════"
 [[ $FAIL -eq 0 ]]

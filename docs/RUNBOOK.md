@@ -304,12 +304,33 @@ persistent offset in `/var/lib/hermes-bus/tg-offset.json`). The chat has a keybo
 | what you type | what happens |
 |---|---|
 | any text, e.g. *проверить загрузку сервера* | **task** for the agents: routed to a specialist, result comes back in the chat |
-| `/task <текст>` | the same, explicitly |
+| *какие агенты есть и их функции* | answered immediately from the registry (`agents/roster.py`) — it is a question, not a task |
+| *какие проекты* | the projects, their paths and which checkouts are missing |
+| `/agents [имя]` | the whole team in one screen, or everything about one agent |
+| `/projects` | projects under watch |
+| `/task <текст>` | a task, explicitly |
 | `/status` | units, bus stream/consumers, agents, nodes, projects |
 | `/digest [N]` | one-screen summary of the last N messages per channel |
 | `/servers` | who is on the bus |
 | `/note <текст>` | a plain event on `#general` (no execution) |
 | `/help` | the command list |
+
+The keyboard under the message box is the fastest way in — tapping a button is exactly the
+same as typing its label:
+
+| button | effect |
+|---|---|
+| 🤖 Агенты | who is on the team and what each one does |
+| 📦 Проекты | projects, paths, missing checkouts |
+| 💻 Сервер | sends the task *проверить загрузку сервера* |
+| 💾 Бэкап | sends the task *проверить бэкапы* |
+| 📊 Статус | node state |
+| ❓ Помощь | the command list |
+
+*What reaches the phone:* channel traffic only (agent-to-agent DMs are internal wiring;
+errors are always forwarded), one copy per message across the federation, ≤20/min, nothing
+tagged `selftest`, and the owner's own task is acknowledged once instead of echoed back.
+Agent output is shown in monospace with a `📎 Полный вывод:` link to the raw log.
 
 **How a task finds its agent** (`runtime.route_by_text`, deterministic — no model, no
 tokens): 1) a project named in the task (exact name first, longest match; then the *shortest*

@@ -94,3 +94,51 @@ Tests that now guard all of it: `tests/run.sh` gate [11] via `tests/probe-chat.p
 * **A shortcut that matches a substring will eat a command.** Match labels exactly.
 * **Anything that publishes to real channels will reach the owner** the moment forwarding
   works; test traffic needs an explicit filter, found by reading the phone, not the log.
+
+---
+
+## Follow-up (same day) — the refusal the owner hit next
+
+With routing in place, the owner asked the chat **"Какие агенты есть и их функции"** and got:
+
+```
+❌ ОШИБКА · #orchestrator
+не понял задачу «Какие агенты есть и их функции» — не нашёл ни проекта, ни ключевого слова.
+Известные возможности: alerts, backup, ci, commit, container-state, coordination, disk,
+docker, exposure, firewall, git, github, grafana, host-health, journal, load, metrics, …
+```
+
+The system was not wrong — it was unhelpful. Three things were wrong with that answer:
+
+1. **A question about the system was treated as a task for a specialist.** "Who is on the team"
+   is answered by the registry, and every agent YAML already carried a human `purpose` in
+   Russian. Nobody ever rendered it for a human.
+2. **The failure text dumped 30 capability tokens** — machine vocabulary handed to a person
+   on a phone, and it did not even name the agents.
+3. **Nothing to tap.** The owner had to invent the wording; the keyboard only reported state.
+
+Fixed by: `agents/roster.py` (one renderer, shared by the chat and the bus, so they cannot
+disagree), `/agents` + `/projects` and the meta questions *какие агенты / что ты умеешь /
+какие проекты*, a refusal in plain language with four example tasks, and a six-button
+keyboard where 🤖 Агенты and 📦 Проекты answer, while 💻 Сервер and 💾 Бэкап send real tasks.
+
+**LESSON (additional):** an error message is a user interface. "Не понял" plus a vocabulary
+dump tells the owner what the *machine* knows, not what to do next; a good refusal names the
+next action, and a good system answers questions about itself.
+
+**EVIDENCE (server, after the fix):**
+
+```
+$ hermes-bus read --channel orchestrator -n 2
+task/normal   root          @orchestrator какие агенты есть и их функции
+result/normal orchestrator  🤖 Моя команда: 27 агентов
+                            🛠 Специалисты (6): 🖥 server-guardian — Здоровье узла, 💾 backup — …
+
+$ hermes-bus read --channel orchestrator -n 1
+error/normal orchestrator   🤔 Не понял: «приготовить кофе»
+                            Уточни направление — например:
+                            • проверить загрузку сервера
+                            • сделать бэкап
+                            • аудит безопасности
+                            • статус проекта logistics
+```

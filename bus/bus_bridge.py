@@ -60,7 +60,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# The agent registry has ONE renderer (agents/roster.py), shared with the bus side: the
+# chat and the board can never disagree about who is on the team.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "agents"))
 from bus import CHANNELS, STATE_DIR, envelope, mirror_local, node_name, server_id  # noqa: E402
+import roster  # noqa: E402
 
 NATS_ENV = "/etc/hermes/nats.env"
 
@@ -80,12 +84,20 @@ KIND_STYLE = {
 PRIO_MARK = {"urgent": "🔥 ", "high": "❗ ", "normal": "", "low": "· "}
 
 
+# Two buttons give information (кто в команде, что за проекты), two send a real task, two
+# report state. Tapping a button is exactly equivalent to typing its label.
 MAIN_KEYBOARD = {
-    "keyboard": [[{"text": "📊 Статус"}, {"text": "🗞 Сводка"}],
-                 [{"text": "🖧 Узлы"}, {"text": "❓ Помощь"}]],
+    "keyboard": [[{"text": "🤖 Агенты"}, {"text": "📦 Проекты"}],
+                 [{"text": "💻 Сервер"}, {"text": "💾 Бэкап"}],
+                 [{"text": "📊 Статус"}, {"text": "❓ Помощь"}]],
     "resize_keyboard": True,
     "is_persistent": True,
 }
+
+# Buttons that ARE tasks: the label is a shortcut, the task text is what humans would write.
+BUTTON_TASKS = {"сервер": "проверить загрузку сервера", "бэкап": "проверить бэкапы"}
+BUTTON_META = {"агенты": "agents", "проекты": "projects", "статус": "status",
+               "сводка": "digest", "узлы": "servers", "помощь": "help"}
 
 
 def esc(text: str) -> str:
@@ -276,7 +288,11 @@ def should_forward(env: dict) -> bool:
             # The bus selftest publishes to real channels (that is how it proves mirroring
             # and priorities). Its messages are tagged "selftest" and are the only thing
             # filtered here: tests must exercise the real path without pinging the owner.
-            and "selftest" not in text)
+            and "selftest" not in text
+            # The owner's own task is already acknowledged ("Задача принята"); echoing it
+            # back from the bus is the same sentence twice.
+            and not (env.get("kind") == "task"
+                     and (env.get("text") or "").startswith("@orchestrator")))
 
 
 def tg_line(env: dict) -> str:
@@ -299,8 +315,8 @@ def tg_line(env: dict) -> str:
              shown]
     if env.get("correlation_id"):
         lines.append(f"\n🔗 corr <code>{esc(env['correlation_id'])}</code>")
-    for r in (env.get("refs") or [])[:3]:
-        lines.append(f"• {esc(r)}")
+    for r in (env.get("refs") or [])[:2]:
+        lines.append(f"📎 Полный вывод: <code>{esc(r)}</code>")
     return "\n".join(lines)
 
 
@@ -393,6 +409,16 @@ def owner_status() -> str:
     return "\n".join(lines)
 
 
+def owner_agents(arg: str) -> str:
+    """Who is on this node and what they do — the team, in one screen."""
+    text = roster.detail(arg) if arg.strip() else roster.overview()
+    return f"<pre>{esc(text)}</pre>"
+
+
+def owner_projects() -> str:
+    return f"<pre>{esc(roster.projects())}</pre>"
+
+
 def owner_servers() -> str:
     return ("🖧 <b>Узлы на шине</b>\n<pre>"
             + esc(_run(["/usr/local/bin/hermes-bus", "nodes"])) + "</pre>")
@@ -407,21 +433,27 @@ def owner_digest(arg: str) -> str:
                                                       "digest", "-n", str(n)])) + "</pre>"
 
 
-HELP = """🤖 <b>Hermes control</b> — что я умею
+HELP = """🤖 <b>Hermes на связи</b>
 
-🧩 <b>Задача агентам</b> — просто напиши текстом, например:
-    <i>проверить загрузку сервера</i>
-    <i>статус проекта logistics</i>
-    <i>сделать бэкап и проверить его</i>
-🧩 /task &lt;текст&gt; — то же самое явной командой
+Просто напиши, что нужно, обычными словами:
+   <i>проверить загрузку сервера</i>
+   <i>статус проекта logistics</i>
+   <i>сделать бэкап</i>
+   <i>аудит безопасности</i>
+   <i>какие агенты</i>
 
-📊 /status — состояние узла: юниты, шина, агенты, узлы
-🗞 /digest [N] — сводка последних N сообщений по каналам
-🖧 /servers — кто на шине
-📝 /note &lt;текст&gt; — просто событие в #general (без исполнения)
-❓ /help — эта справка
+Или нажми кнопку внизу 👇 — там самые частые вещи.
 
-<i>Результат работы агента придёт сюда же отдельным сообщением.</i>"""
+📋 <b>Команды</b>
+/agents — кто в команде и что умеет
+/projects — какие проекты под наблюдением
+/status — состояние узла
+/digest [N] — сводка шины за последние N сообщений
+/servers — узлы на шине
+/note &lt;текст&gt; — просто записать событие, без исполнения
+/help — эта справка
+
+<i>Ответ агента придёт сюда же отдельным сообщением.</i>"""
 
 
 def handle_owner_text(text: str) -> str:
@@ -433,18 +465,38 @@ def handle_owner_text(text: str) -> str:
     # The phone keyboard sends its button label as text ("📊 Статус"). Accept the LABEL —
     # not any sentence that happens to contain the word: "статус проекта hermes-os" is a
     # task for an agent, and an earlier version of this shortcut swallowed it and answered
-    # with the node status instead. Matching a normalized label is the narrow rule:
+    # with the node status instead. Matching a normalized label is the narrow rule.
     label = re.sub(r"[^a-zа-я]+", "", t.lower())
-    if label in ("статус", "сводка", "узлы", "помощь", "start", "help"):
-        return {"статус": owner_status, "сводка": lambda: owner_digest("3"),
-                "узлы": owner_servers, "помощь": lambda: HELP,
-                "start": lambda: HELP, "help": lambda: HELP}[label]()
+    if label in BUTTON_TASKS:                     # 💻 Сервер / 💾 Бэкап are tasks, not answers
+        return _publish("orchestrator", "task", BUTTON_TASKS[label])
+    if label in BUTTON_META:
+        return {
+            "agents": lambda: owner_agents(""),
+            "projects": owner_projects,
+            "status": owner_status,
+            "digest": lambda: owner_digest("3"),
+            "servers": owner_servers,
+            "help": lambda: HELP,
+        }[BUTTON_META[label]]()
+    if label in ("start",):
+        return HELP
+    # A question about the system itself must be ANSWERED, not refused as a task: the owner
+    # asked "какие агенты есть и их функции" and got "не понял задачу" plus a dump of
+    # capability tokens. (runtime.py answers the same question on the bus.)
+    if re.search(roster.META_AGENTS, low):
+        return owner_agents("")
+    if re.search(roster.META_PROJECTS, low):
+        return owner_projects()
     if low.startswith("/status"):
         return owner_status()
     if low.startswith("/digest"):
         return owner_digest(t.split()[1] if len(t.split()) > 1 else "3")
     if low.startswith("/servers") or low.startswith("/nodes"):
         return owner_servers()
+    if low.startswith("/agents") or low.startswith("/roster"):
+        return owner_agents(t.split(" ", 1)[1] if " " in t else "")
+    if low.startswith("/projects"):
+        return owner_projects()
     if low.startswith("/task"):
         body = t[5:].strip()
         if not body:
@@ -524,7 +576,7 @@ def tg_poll_once(token: str, timeout: int = 25) -> int:
                 f"— run `bus_bridge.py discover` if this is the owner")
             continue
         log(f"telegram <- {frm.get('username') or cid}: {text[:80]!r}")
-        want_keyboard = text.strip().lower() in ("/start", "/help", "help", "/?")
+        want_keyboard = True   # the keyboard is the main way to drive this from a phone
         try:      # a visible "typing…" while a handler runs, so silence never looks like death
             tg_api(token, "sendChatAction", {"chat_id": cid, "action": "typing"}, timeout=10)
         except Exception:
