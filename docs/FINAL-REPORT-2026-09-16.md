@@ -51,10 +51,10 @@ issues". Every Hermes gate is `[OK]`: bus transport / token / bridge / stream, f
 | skills enabled | **12** |
 | bus channels | **9** |
 | monitoring alerts / dashboard panels | **8** / **12** |
-| agent handlers (from 31) | **128** |
+| agent handlers (from 31) | **130** |
 | check scripts, all in one report format | **24** |
 | doctor gates | **18** |
-| tests | **82** repo + **27** agents selftest + **10** bus + **10** federation per peer |
+| tests | **89** repo + **34** agents selftest + **10** bus + **10** federation per peer |
 | backups | nightly 03:30 UTC, verified (sha256 + content) and rehearsed |
 
 ## Errors found and fixed while building
@@ -82,7 +82,9 @@ issues". Every Hermes gate is `[OK]`: bus transport / token / bridge / stream, f
 21. **The test suite pinged the owner's phone** — `bus-selftest.sh` publishes to real channels (that is how it proves mirroring and priorities) and the bridge forwarded it. Test traffic is filtered by its `selftest` tag; the suite still exercises the live path.
 22. **Every agent answered with the same generic report.** «Что грузит сервер?» produced the host dump because routing knew four intents and always asked for `status`; and every report was a raw column dump — on a phone, that is not an answer. Fixed with `agents/routing.py` (deterministic sentence → capability + handler: top, disk, memory, docker, logs, ports, secrets, updates, alerts, targets, repos, pending) and one report format for all 24 check scripts (`agents/checks/lib/report.sh`) ending in a 💡 advice line. Capability grew from 31 handlers to **128**.
 23. **Agents had no model policy.** Models were picked by the gateway per request, with no relation to what the agent does. Now `config/models.yaml` + `agents/models.py` give every agent a tier — free/cheap by default, `hermes-reason` for analysis, `hermes-code` for diffs, `hermes-long` for long context, local Ollama as the degradation path — with each escalation logged and its cost visible. Measured: a real `ask` answers in ~1.1 s on a free tier.
-24. **Deploying generated config broke the node** — my helper copied `config/agents/*.yaml`, whose handler paths are generated *on the target*, from the working copy; 3 tests went red describing `/home/user/...`. `wire-agents.sh` regenerated them and the deploy script now refuses to ship `config/` at all.
+24. **"Сервер что с процессом chromium" answered with the generic host report.** The word «сервер» matched the broadest host rule and the process name was never used. Now the subject of a sentence is extracted and the agent investigates it (`proc` for a process, `docker` for a container, `services` for a unit), and an unmatched *question* is answered by the agent's model over gathered facts instead of a default status dump.
+25. **There was no way to act, only to look.** The owner asked for full system access; the delivered answer is capability without a shell: `agents/checks/act.sh` — a fixed verb list (restart/start container, restart allow-listed unit, prune dangling images, vacuum journal) over named objects, with strict name validation, existence checks, printed results and an audit line per action. Refusals (disallowed unit, missing container, `; rm -rf /` in a name, unknown verb) are covered by tests, because a guardrail nobody tests is decoration.
+26. **Deploying generated config broke the node** — my helper copied `config/agents/*.yaml`, whose handler paths are generated *on the target*, from the working copy; 3 tests went red describing `/home/user/...`. `wire-agents.sh` regenerated them and the deploy script now refuses to ship `config/` at all.
 
 ## Remaining issues / honest limitations
 

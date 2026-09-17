@@ -233,6 +233,11 @@ def run_handler(agent: Agent, handler: str, args: dict, actor: str) -> dict:
     # message must not be able to smuggle shell syntax into a handler invocation.
     env = dict(os.environ, AGENT_ID=agent.id, AGENT_ACTOR=actor,
                HANDLER=handler, ARGS_JSON=json.dumps(args, ensure_ascii=False))
+    # Each argument is also exported as ARG_<NAME> (ARG_SUBJECT, ARG_ACTION, ARG_TARGET), so
+    # a check script reads the object it must look at without parsing JSON in bash.
+    for k, v in (args or {}).items():
+        if isinstance(v, (str, int, float)) and k.isidentifier():
+            env[f"ARG_{k.upper()}"] = str(v)
     # Static per-handler environment from the agent's YAML (project path, service name…).
     env.update({str(k): str(v) for k, v in (spec.get("env") or {}).items() if v is not None})
     LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -489,8 +494,12 @@ class Runtime:
             if task.lower().startswith(prefix):
                 task = task[len(prefix):].strip()
         facts_handler = routing.pick_handler(agent, args.get("facts_handler") or "status")
+        # The subject the owner asked about must reach the fact-gathering script, otherwise
+        # "что с процессом chromium" would explain the whole host instead of chromium.
+        fact_args = {k: v for k, v in (args or {}).items()
+                     if k not in ("handler", "facts_handler") and v}
         async with self.sem:
-            facts = await asyncio.to_thread(run_handler, agent, facts_handler, {},
+            facts = await asyncio.to_thread(run_handler, agent, facts_handler, fact_args,
                                             env.get("from") or "unknown")
         fact_text = facts.get("text") or "(нет данных)"
         analysis = bool(env.get("args", {}).get("analysis")) or True
@@ -542,8 +551,12 @@ class Runtime:
             return
         handler_hint = args.get("handler") or ""
         analysis = False
+        decision_args: dict = {}
+        if args.get("subject"):
+            decision_args = {**decision_args, "subject": args["subject"]}
         if not target and not capability:
             decision = self.route(task)
+            decision_args = decision
             capability = decision["capability"]
             target = decision["target"]
             why = decision["why"]
@@ -588,7 +601,7 @@ class Runtime:
             log(f"handler {handler_hint!r} not declared by {target}; using {handler!r}")
         self.remember(corr, {"task": task, "agent": target, "handler": handler,
                              "dispatcher": agent.id, "channel": channel or "orchestrator",
-                             "analysis": analysis,
+                             "analysis": analysis, "subject": decision_args.get("subject", ""),
                              "at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
         await self.publish(nc, channel=channel or "orchestrator", kind="task",
                            text=f"задача → {target}: {task} (handler={handler}, corr={corr})",
@@ -598,9 +611,15 @@ class Runtime:
         facts_with = "status"
         if handler == "ask":
             facts_with = (routing.route(task, self.agents).get("facts_handler") or "status")
+        # The subject/action travel with the task: the target must investigate THAT process
+        # or container, and (for `act`) know which verb was asked for.
+        payload = {"handler": handler, "facts_handler": facts_with}
+        for key in ("subject", "action"):
+            if decision_args.get(key):
+                payload[key] = decision_args[key]
         await self.publish(nc, channel=None, to=target, kind="task",
                            text=f"{handler} {task}", correlation=corr, agent=agent.id,
-                           args={"handler": handler, "facts_handler": facts_with})
+                           args=payload)
         log(f"dispatched corr={corr} → {target}.{handler} ({why or 'explicit'})"
             f"{' + анализ' if analysis else ''}")
 

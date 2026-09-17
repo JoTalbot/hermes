@@ -73,6 +73,8 @@ CORE = {
                   "memory": f"bash {CHECKS}/guardian-memory.sh",
                   "docker": f"bash {CHECKS}/guardian-docker.sh",
                   "logs": f"bash {CHECKS}/guardian-logs.sh",
+                  "proc": f"bash {CHECKS}/guardian-proc.sh",
+                  "act": f"bash {CHECKS}/act.sh",
                   "services": f"bash {CHECKS}/guardian-services.sh",
                   "hermes": f"bash {CHECKS}/hermes-status.sh",
                   "ask": None, "identity": None, "ping": None}),

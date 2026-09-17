@@ -113,6 +113,12 @@ bus:
     logs:
       run: bash /opt/hermes/agents/checks/guardian-logs.sh
       timeout: 180
+    proc:
+      run: bash /opt/hermes/agents/checks/guardian-proc.sh
+      timeout: 180
+    act:
+      run: bash /opt/hermes/agents/checks/act.sh
+      timeout: 180
     services:
       run: bash /opt/hermes/agents/checks/guardian-services.sh
       timeout: 180

@@ -388,3 +388,48 @@ Escalation is a decision, not a default: every use is logged with the model alia
 reason (`journalctl -u hermes-agents | grep ask:`), so cost drift is visible. When the
 balancer is unreachable the agent answers with the measured facts and says plainly that the
 model was unavailable — a question never fails because a model did.
+
+## Named subjects and guarded actions (2026-09-17, second pass)
+
+### A question about a *specific thing*
+
+`«Сервер что с процессом chromium»` used to return the generic host report: the sentence
+contains «сервер», nothing else matched, and every agent answered with its `status` handler.
+Now the subject is extracted (`routing.subject`) and the agent investigates **that** object:
+
+| you write | facts | answer |
+|---|---|---|
+| что с процессом chromium | `proc` — экземпляры, CPU/RSS, потоки, дети, порты, контейнер, журнал | отчёт + (если вопрос «почему») объяснение моделью |
+| почему контейнер octopus упал | `docker` с фильтром по имени — статистика и логи контейнера | разбор причины моделью |
+| что с сервисом nats-server | `services` с фильтром — состояние юнита и его журнал | — |
+
+And **an unmatched question is no longer a generic report**: if nothing matches but the text
+is a question (`почему/стоит ли/сколько/…?`), the agent gathers host facts and lets its model
+answer — `handler=ask`. The generic status dump is now a fallback, not the default.
+
+### Actions: what "give the agent access" means here
+
+The owner asked whether the agent should get full access to the system. It should get real
+**capability**, not a shell — a chat message must never become an arbitrary root command,
+because the bot token and the phone are weaker secrets than an SSH key, and one leak would
+hand over the whole box (including other teams' projects running on it).
+
+So `agents/checks/act.sh` implements a fixed verb list over named objects:
+
+| you write | what runs | guards |
+|---|---|---|
+| перезапусти контейнер `<имя>` | `docker restart <имя>` | имя обязано существовать; имя проверяется `^[A-Za-z0-9][A-Za-z0-9_.@-]{0,62}$` |
+| запусти контейнер `<имя>` | `docker start <имя>` | то же |
+| перезапусти сервис `<имя>` | `systemctl restart <имя>.service` | префиксы `hermes-*`, `octopus*`, `nats-server`, `logistics*`, `madworld*`, `transcribe*`, `aios*` |
+| почисти docker | `docker image prune -f` | только dangling-образы, работающие контейнеры не затрагиваются |
+| сжать журнал | `journalctl --vacuum-size=500M` | остаются последние 500 MiB |
+
+Impossible by construction: stop/kill of anything, restart of core units (ssh, networking),
+package management, `docker run`, arbitrary paths or shell arguments. Every action prints
+what it did and is logged by the runtime with the actor
+(`journalctl -u hermes-agents | grep act:` — an audit trail), and each refusal explains the
+allowed set. A too-broad sentence («перезапусти сервер») is refused rather than guessed.
+
+`tests/agents-selftest.sh` asserts the refusals, not just the successes: disallowed unit,
+missing container, a name carrying `; rm -rf /`, an unknown verb, and the absence of `eval`
+or `bash -c` in the script.

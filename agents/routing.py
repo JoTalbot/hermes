@@ -40,7 +40,13 @@ INTENT_RULES: list[tuple[str, str, str, str]] = [
     (r"таргет|target|экспорт|скрейп|scrape", "monitoring", "цели Prometheus", "targets"),
     (r"мониторинг|monitoring|prometheus|grafana|метрик|metric|slo|дашборд", "monitoring",
      "мониторинг", "health"),
-    # ── host: specific resources first ──────────────────────────────────────
+    # ── a named thing: process / service / container ────────────────────────
+    # "Сервер что с процессом chromium" used to fall through to the generic host report,
+    # because it contains the word "сервер" and nothing else matched. The name of a process
+    # is the signal; it becomes a `probe` over that name (facts) and, being a question,
+    # flows into `ask` so the answer explains what the numbers mean.
+    (r"что с процесс|процесс|процессы|жр[её]т|ест cpu|ест память|утечк", "host-health",
+     "процесс", "proc"),
     (r"что грузит|кто грузит|что ест|жр[её]т|топ процесс|top|процессор|cpu|загрузк|нагрузк|"
      r"load|тормоз|лаг|тяжел|тяжёл", "host-health", "загрузка CPU", "top"),
     (r"диск|место|df|inode|забит|переполн", "host-health", "диски", "disk"),
@@ -93,6 +99,41 @@ def pick_handler(agent, handler: str) -> str:
     return agent.handlers[0] if agent.handlers else "identity"
 
 
+# Guarded actions. Deliberately NOT a shell: a fixed verb over a named object, an allowlist
+# of object kinds, and every execution logged. The owner asked for real power over the box;
+# arbitrary shell from a chat message would make one leaked bot token equal root.
+ACTION_RULES: list[tuple[str, str, str]] = [
+    (r"перезапус|рестарт|restart|подними|поднять заново", "restart", "перезапуск"),
+    (r"запусти|старт|start|подними", "start", "запуск"),
+    (r"prune|почист[аи] docker|убери образ|освободи место в docker", "prune-images",
+     "очистка docker"),
+    (r"vacuum|почист[аи] журнал|сжать журнал", "vacuum-journal", "сжатие журнала"),
+]
+
+ACTION_OBJECTS = (r"контейнер|container|сервис|юнит|unit|демон|служб|том|volume")
+
+
+def parse_action(task: str) -> dict:
+    """('restart', 'octopus-browser') из «перезапусти контейнер octopus-browser»."""
+    low = task.lower()
+    verb = kind = ""
+    for rx, v, k in ACTION_RULES:
+        if re.search(rx, low):
+            verb, kind = v, k
+            break
+    if not verb:
+        return {}
+    target = subject(task)
+    if verb in ("prune-images", "vacuum-journal"):
+        return {"action": verb, "target": "", "why": kind}
+    if not target:
+        return {}
+    if verb in ("restart", "start") and not re.search(ACTION_OBJECTS, low):
+        # «перезапусти сервер» — the object is too broad to act on safely
+        return {}
+    return {"action": verb, "target": target, "why": f"{kind} «{target}»"}
+
+
 META_AGENTS = (r"какие агент|список агент|агенты и их|кто умеет|что ты умеешь|что умеешь|"
                r"кто есть в команде|состав команды|какие функции|кто может|моя команда")
 META_PROJECTS = (r"какие проект|список проект|что за проект|проекты под наблюдением")
@@ -103,7 +144,34 @@ def route(task: str, agents: dict) -> dict:
     low = (task or "").lower()
     caps = _caps(agents)
     out = {"capability": "", "target": "", "why": "", "handler": "status",
-           "facts_handler": "status", "analysis": False}
+           "facts_handler": "status", "analysis": False,
+           "subject": "", "action": "", "target_object": ""}
+
+    # An action on a named object beats everything: «перезапусти контейнер octopus-browser»
+    # names a project too, and answering it with the project's status would be a no-op.
+    act = parse_action(task)
+    if act:
+        out.update(capability="host-health", handler="act", why=act["why"],
+                   facts_handler="docker")
+        out.update({k: v for k, v in act.items() if k in ("action", "target")})
+        return out
+
+    # A named process/container/service is a specific subject: investigate THAT, don't print
+    # a generic report ("Сервер что с процессом chromium").
+    subj = subject(task)
+    if subj:
+        if re.search(r"контейнер|container|docker", low):
+            out.update(capability="host-health", handler="docker", facts_handler="docker",
+                       why=f"контейнер «{subj}»", subject=subj)
+            return _finish(out, low)
+        if re.search(r"процесс", low):
+            out.update(capability="host-health", handler="proc", facts_handler="proc",
+                       why=f"процесс «{subj}»", subject=subj)
+            return _finish(out, low)
+        if re.search(r"сервис|юнит|unit|демон", low):
+            out.update(capability="host-health", handler="services", facts_handler="services",
+                       why=f"сервис «{subj}»", subject=subj)
+            return _finish(out, low)
 
     # A question about the system itself is not a task for a specialist: the orchestrator
     # answers it from the registry. Checked first so "какие агенты" never becomes "hermes".
@@ -142,6 +210,13 @@ def route(task: str, agents: dict) -> dict:
     for rx, cap, label, handler in INTENT_RULES:
         if re.search(rx, low) and (not cap or cap in caps):
             out.update(capability=cap, why=label, handler=handler, facts_handler=handler)
+            if handler == "proc":
+                name = subject(task)
+                if name:
+                    out.update(why=f"процесс «{name}»", facts_handler="proc", subject=name)
+                else:
+                    # no name given: "что жрёт процессор" is the general load question
+                    out.update(handler="top", facts_handler="top", why="загрузка CPU")
             return _finish(out, low)
 
     # 3. maybe the task simply names an agent
@@ -149,7 +224,34 @@ def route(task: str, agents: dict) -> dict:
         if tok in agents and tok != "orchestrator":
             out.update(target=tok, why=f"агент «{tok}»", handler="status", facts_handler="status")
             return _finish(out, low)
+
+    # 4. an unmatched QUESTION is still answerable: gather the host facts and let the
+    #    agent's model explain them. Silently answering with a generic status report is
+    #    what made every reply look the same.
+    if re.search(r"\?|^(что|почему|как|где|когда|кто|чем|зачем|сколько|можно ли|стоит ли)\b", low):
+        out.update(capability="host-health", why="вопрос общего вида", handler="ask",
+                   facts_handler="status")
+        return out
     return out
+
+
+def subject(task: str) -> str:
+    """The concrete thing a question is about: a process, unit or container name.
+
+    "Сервер что с процессом chromium" → chromium. Used as the probe target, so the agent
+    investigates THAT name instead of printing a generic report.
+    """
+    low = task.lower()
+    m = re.search(r"процесс[а-я]*\s+([a-z0-9][a-z0-9_.\-]{2,})", low)
+    if m:
+        return m.group(1)
+    m = re.search(r"(?:контейнер|сервис|юнит|демон|служб)[а-я]*\s+([a-z0-9][a-z0-9_.\-]{2,})", low)
+    if m:
+        return m.group(1)
+    # a latin word in a Russian sentence is almost always a program name (chromium, docker…)
+    latin = [w for w in re.findall(r"[a-z][a-z0-9_.\-]{3,}", low)
+             if w not in ("that", "what", "with", "this")]
+    return latin[0] if latin else ""
 
 
 def _finish(out: dict, low: str) -> dict:

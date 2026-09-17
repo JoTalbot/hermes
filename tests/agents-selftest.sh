@@ -73,6 +73,21 @@ ck "длинный контекст — gemini flash" "$MPROBE" "escalate-long=h
 ck "в политике моделей нет ключей" "$MPROBE" "policy-clean=True"
 ck "упавший балансер не вешает задачу" "$MPROBE" "degrade-no-hang=True"
 
+echo "[4b] actions: real power, but a fixed verb list — nothing else executes"
+ck "act.sh существует и исполняем" "$([[ -x agents/checks/act.sh ]] && echo yes)" "yes"
+ck "запрещённый юнит отклоняется (sshd)" \
+   "$(ARG_ACTION=restart-unit ARG_TARGET=sshd bash agents/checks/act.sh 2>&1 | grep -c 'не входит в разрешённый список')" "1"
+ck "несуществующий контейнер отклоняется" \
+   "$(ARG_ACTION=restart-container ARG_TARGET=no-such-container bash agents/checks/act.sh 2>&1 | grep -c 'нет на этом узле')" "1"
+ck "имя с инъекцией отклоняется" \
+   "$(ARG_ACTION=restart-container ARG_TARGET='octopus; rm -rf /' bash agents/checks/act.sh 2>&1 | grep -c 'недопустимое имя')" "1"
+ck "неизвестное действие отклоняется" \
+   "$(ARG_ACTION=format-disk ARG_TARGET=octopus bash agents/checks/act.sh 2>&1 | grep -c 'не разрешено')" "1"
+ck "в act.sh нет оболочки и eval" \
+   "$(grep -cE 'eval |bash -c|\(shell=True\)|\$\(cat' agents/checks/act.sh)" "0"
+ck "действия ограничены списком (не произвольный shell)" \
+   "$(grep -c 'UNIT_ALLOW' agents/checks/act.sh)" "2"
+
 echo "[5] live: the balancer answers through the shim"
 if command -v curl >/dev/null && curl -s -m 5 http://127.0.0.1:9700/v1/models >/dev/null 2>&1; then
   MODELS=$(curl -s -m 5 http://127.0.0.1:9700/v1/models | "$PYBIN" -c "
