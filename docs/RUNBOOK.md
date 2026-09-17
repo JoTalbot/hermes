@@ -738,3 +738,10 @@ for the owner, it deletes nothing.
    a routing one; and the ratings report printed no `ИТОГ` line until the first rating existed, so
    the live gate could not see the empty state. Both fixed; the live ratings check now runs on a
    fixture and on the node's file.
+
+**After deploying agent code, restart the unit.** Python caches imports at start, so a fixed
+`agents/routing.py` keeps answering by the old rules until `hermes-agents` is restarted (same for
+`bus/bus_bridge.py` and `hermes-bus-bridge`). Measured during this batch: `routing.py` was deployed
+at 06:17:30 while the running `hermes-agents` had started at 06:01:27; the live task «статус hermes»
+only reached the fixed routing after `systemctl restart hermes-agents`. Check with
+`systemctl show -p ExecMainStartTimestamp --value hermes-agents` against the file mtime.

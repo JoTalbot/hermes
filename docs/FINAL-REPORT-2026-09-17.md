@@ -122,3 +122,15 @@ state (the check now runs on a fixture and on the node's file).
 code path is verified on the node: both 👍 and 👎 record the question and answer and clear the tag);
 the 12 skills of ours declare no capability/bounds (`docs/SKILLS-TODO.md`); items 9 (TLS on 9119)
 and 10 (second server) were not part of this batch.
+
+**Live proof of the last two items** (after the fixes were committed as `d464024` and the working
+tree was clean): the owner's own question was posted on the bus exactly as the Telegram bridge does
+(`hermes-bus post --channel orchestrator --kind task "@orchestrator статус hermes"`) and the run
+history recorded `agent=server-guardian · handler=hermes` — the stack question is answered by the
+host agent, not by the `hermes-os` project agent, which is what the old alias did. Rating buttons
+were sent to the owner in Telegram (message_id=210) so the last live check — a real tap — can be
+made by hand.
+
+**Lesson from the batch:** after deploying agent code the unit must be restarted (Python caches
+imports at start); a fixed `routing.py` keeps answering by the old rules otherwise. `hermes-agents`
+had been running since 06:01:27 while the fixed routing landed at 06:17:30.
