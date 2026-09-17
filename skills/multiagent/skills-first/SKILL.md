@@ -1,6 +1,8 @@
 ---
 name: skills-first
 description: Mandatory find-use-improve-create order before implementing anything, and where this ecosystem's skill catalogues live. Use before writing new automation, scripts or procedures, so existing skills are reused instead of duplicated.
+capability: Задавать обязательный порядок find → use → improve → create перед реализацией, со ссылками на каталоги скиллов.
+bounds: Не создаёт и не удаляет скиллы автоматически: новый скилл — предложение владельцу, дубликат не появляется молча.
 ---
 # Why
 The owner's directive (`#57 §4-6`, `/root/agents/005-MULTIAGENT-PARALLEL-SKILLS.md §4-5`): agents **must not** solve repeatable or complex work with one-off unstructured commands when a skill exists or can be created. Order is fixed: **find → use → improve → create**. Every finished task is expected to crystallise into a reusable skill (log → skill), because a second agent will meet the same problem.

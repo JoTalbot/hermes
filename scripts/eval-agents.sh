@@ -21,7 +21,7 @@ done
 
 MODE="${1:-}"
 "$PY" - "$MODE" <<'PY'
-import json, sys
+import json, os, sys
 sys.path.insert(0, "/opt/hermes")
 sys.path.insert(0, "/opt/hermes/agents")
 import routing
@@ -56,6 +56,25 @@ CASES = [
     ("какие провайдеры llm живы", "host-health", "models", ""),
 ]
 
+# Набор из 👎 (пишет scripts/feedback-to-eval.sh): владелец уже сказал, что эти вопросы
+# обработаны плохо. Ожидание — маршрут на момент оценки, то есть защита от регрессии.
+FEEDBACK_CASES: list[tuple[str, str, str, str]] = []
+_fb_path = os.path.join("/opt/hermes", "tests", "eval-feedback.tsv")
+if not os.path.exists(_fb_path):
+    _fb_path = os.path.join(os.getcwd(), "tests", "eval-feedback.tsv")
+try:
+    with open(_fb_path, encoding="utf-8") as _fh:
+        for _line in _fh:
+            if _line.startswith("#") or not _line.strip():
+                continue
+            _p = _line.rstrip("\n").split("\t")
+            if len(_p) >= 4 and _p[0].strip():
+                FEEDBACK_CASES.append((_p[0], _p[1], _p[2], _p[3]))
+except OSError:
+    pass
+BUILTIN = len(CASES)
+CASES = CASES + FEEDBACK_CASES
+
 rows, bad = [], 0
 for task, want_cap, want_handler, want_subject in CASES:
     d = routing.route(task, agents)
@@ -78,7 +97,8 @@ for task, want_cap, want_handler, want_subject in CASES:
                  "got": [got_cap, got_handler, got_subject], "ok": ok, "agent": target})
 
 if mode == "--json":
-    print(json.dumps({"cases": rows, "passed": len(rows) - bad, "failed": bad},
+    print(json.dumps({"cases": rows, "passed": len(rows) - bad, "failed": bad,
+                      "builtin": BUILTIN, "from_feedback": len(FEEDBACK_CASES)},
                      ensure_ascii=False, indent=1))
 else:
     print("=== ПРОГОН: понимает ли система вопросы владельца ===")
@@ -88,7 +108,9 @@ else:
         if not r["ok"]:
             print(f"        ожидалось: {r['want']}")
             print(f"        получено : {r['got']}")
-    print(f"\nИТОГ: {len(rows) - bad} из {len(rows)} вопросов уходят правильному агенту и обработчику")
+    print(f"  (встроенных вопросов {BUILTIN}, из оценок 👎 {len(FEEDBACK_CASES)})\n")
+    print(f"ИТОГ: {len(rows) - bad} из {len(rows)} вопросов уходят правильному агенту и "
+          f"обработчику · сбоев {bad}")
 
 sys.exit(1 if bad else 0)
 PY

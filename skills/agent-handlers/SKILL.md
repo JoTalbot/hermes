@@ -1,6 +1,8 @@
 ---
 name: agent-handlers
 description: Add a new handler (capability) to a Hermes agent, or add a whole new agent, safely and reproducibly via config/agents YAML + scripts/wire-agents.sh. Use when an agent must do something new, or when a new project/role needs its own agent.
+capability: Добавлять обработчик или нового агента через config/agents/*.yaml и scripts/wire-agents.sh, с проверкой разводки (--check).
+bounds: Не даёт агенту произвольный shell: обработчиком может быть только объявленный скрипт; править блок bus: руками нельзя — он перезаписывается генератором.
 ---
 
 # Add an agent capability

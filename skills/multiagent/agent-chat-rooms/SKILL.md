@@ -1,6 +1,8 @@
 ---
 name: agent-chat-rooms
 description: The shared chat room where every Hermes profile exchanges messages, tasks and files, and how to read it. Use to talk to other agents, announce work, or follow what the swarm is doing.
+capability: Описывать общие комнаты агентов: кто что публикует, как читать историю комнаты и чем комната отличается от личного сообщения.
+bounds: Комната — не поток внутренних токенов LLM: публикуются только события, решения, задачи и результаты; личные сообщения и секреты туда не попадают.
 ---
 # Why
 Hermes has no separate "chat server": the **kanban board is the bus**, and a *room* is a task whose comments are messages. This works because a task with **no assignee** is never dispatched (verified in `kanban_db.py`: dispatch candidates are `WHERE status = 'ready' AND assignee IS NOT NULL`, and no `kanban.default_assignee` fallback is configured), so a room can hold unlimited comments without ever burning model quota.

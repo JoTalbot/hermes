@@ -52,6 +52,23 @@ TIER_ALIASES = {"hermes-fast", "hermes-reason", "hermes-code", "hermes-long", "h
 TIER_SERVED_NAME = {"hermes-fast": "fast", "hermes-reason": "reasoning", "hermes-code": "code",
                     "hermes-long": "long_context", "hermes-local": "local"}
 
+# DECISION (2026-09-17, владелец «1»): если основной тир не ответил — сначала УМНЫЙ резерв, и
+# только потом локальная модель и «просто факты». Порядок важен: тир code мёртв, и раньше
+# «кодовый» запрос тихо уезжал на fast-модель вместо gemini.
+# Цепочки ацикличны: code → long → reason → (конец), fast → reason, local → fast, auto → long.
+ESCALATE_TO: dict[str, str] = {
+    "hermes-code": "hermes-long",      # кода нет — gemini-flash заметно умнее fast для кода
+    "hermes-fast": "hermes-reason",
+    "hermes-long": "hermes-reason",
+    "hermes-local": "hermes-fast",
+    "hermes-auto": "hermes-long",
+}
+
+
+def escalation_target(model: str) -> str:
+    """Куда идти, если этот тир не ответил. Пустая строка — резерва нет (конец цепочки)."""
+    return ESCALATE_TO.get(model, "")
+
 # Built-in defaults: the policy file may override any of them, but the system behaves
 # sensibly if the file is missing (e.g. inside a recovery container).
 DEFAULT_POLICY = {
@@ -173,8 +190,13 @@ SYSTEM = ("Ты — {agent}, агент узла {node} в системе Hermes
 
 
 def ask(question: str, facts: str, agent_id: str, purpose: str = "", node: str = "узел",
-        model: str = "hermes-auto", timeout: int = 45) -> tuple[str, dict]:
-    """Ask the agent's model to explain the facts. Returns (text, meta)."""
+        model: str = "hermes-auto", timeout: int = 45, _depth: int = 0) -> tuple[str, dict]:
+    """Ask the agent's model to explain the facts. Returns (text, meta).
+
+    Порядок деградации (2026-09-17): запрошенный тир → умный резерв → локальная модель →
+    только факты. `_depth` ограничивает длину цепочки резервов, чтобы отказ балансировщика
+    не превращался в серию дорогих попыток.
+    """
     meta = {"model": model, "ok": False, "latency_ms": 0, "fallback": ""}
     key = _client_key()
     prompt = SYSTEM.format(agent=agent_id, node=node, purpose=purpose or "диагностика узла")
@@ -225,10 +247,22 @@ def ask(question: str, facts: str, agent_id: str, purpose: str = "", node: str =
         meta["fallback"] = f"HTTP {e.code}"
     except Exception as e:
         meta["fallback"] = type(e).__name__
+    # 2. Резервный тир раньше локальной модели: «умный» ответ важнее дешёвой деградации.
+    if _depth < 2:
+        alt = escalation_target(model)
+        if alt and alt != model:
+            text2, meta2 = ask(question, facts, agent_id, purpose, node, model=alt,
+                               timeout=min(timeout, 25), _depth=_depth + 1)
+            if meta2.get("ok"):
+                meta2["escalated_from"] = model
+                meta2["escalated_to"] = alt
+                meta2["latency_ms"] = int((time.time() - started) * 1000)
+                return text2, meta2
+            meta["fallback"] = meta["fallback"] or meta2.get("fallback", "")
     # Degrade, never fail the task: local model first (free, on this box), then facts alone.
     if model != policy()["local"]:
         text, meta2 = ask(question, facts, agent_id, purpose, node, model=policy()["local"],
-                          timeout=timeout)
+                          timeout=min(timeout, 25), _depth=_depth + 1)
         if meta2.get("ok"):
             meta2["escalated_from"] = model
             meta2["latency_ms"] = int((time.time() - started) * 1000)

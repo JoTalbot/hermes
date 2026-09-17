@@ -1,6 +1,8 @@
 ---
 name: chatgpt-ui-driver
 description: Drive the ChatGPT web UI over Chrome DevTools Protocol to keep a project moving autonomously, including the reconnect and protocol rules that took 13 hours of silent failure to learn. Use for browser-based agent drivers, not for API calls.
+capability: Вести диалог в веб-интерфейсе ChatGPT через Chrome DevTools Protocol, включая правила переподключения к браузеру и проверки, что ответ действительно пришёл.
+bounds: Не обходит и не решает Turnstile/капчу силой, не подделывает proof-of-work; не работает без живого браузера с профилем; чужие аккаунты не трогает.
 ---
 # Why
 `POST /backend-api/conversation` requires proof-of-work plus a Cloudflare Turnstile that only a real browser can satisfy from a datacenter IP, so the driver **types into the web UI** over CDP — exactly what a human does. That decision is why this stack exists; an API-based rewrite is not a simplification, it is the failure mode that was already ruled out.

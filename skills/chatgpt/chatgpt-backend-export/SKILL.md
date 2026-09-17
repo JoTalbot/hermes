@@ -1,6 +1,8 @@
 ---
 name: chatgpt-backend-export
 description: Export every ChatGPT conversation of an account through the private backend-api, including the TLS-fingerprint trick that defeats Cloudflare 403 on datacenter IPs. Use to archive, mine or re-index chat history.
+capability: Выгружать переписки своего аккаунта ChatGPT через backend-api с TLS-отпечатком, обходящим Cloudflare 403 с датацентрового IP.
+bounds: Не хранит и не печатает cookie/токены аккаунта; только аккаунт владельца; без массового параллельного обхода и без чужих аккаунтов.
 ---
 # Why
 The official OpenAI export cannot be automated (Settings → Data controls → Export is manual), so the working path is the same backend-api the web UI uses. The non-obvious part, and the reason this is a skill rather than a script dump: **from a datacenter IP, chatgpt.com answers 403 to any plain-HTTP client**. Requests must be sent with a browser TLS fingerprint — `curl_cffi` with `impersonate="chrome"`. Without that detail, every naive attempt looks like "the API is closed".

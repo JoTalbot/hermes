@@ -129,6 +129,9 @@ bus:
     models:
       run: bash /opt/hermes/agents/checks/models.sh
       timeout: 180
+    repeats:
+      run: bash /opt/hermes/agents/checks/repeats.sh
+      timeout: 180
     lookup:
       run: bash /opt/hermes/agents/checks/lookup.sh
       timeout: 180

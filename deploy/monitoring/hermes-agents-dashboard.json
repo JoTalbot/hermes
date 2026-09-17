@@ -491,6 +491,354 @@
     },
     "overrides": []
    }
+  },
+  {
+   "type": "timeseries",
+   "title": "Model answers by tier and provider",
+   "gridPos": {
+    "x": 0,
+    "y": 18,
+    "w": 8,
+    "h": 7
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_model_served_1h",
+     "legendFormat": "{{tier}} / {{provider}}"
+    }
+   ],
+   "description": "Кто реально отвечает агентам. Раньше этого не было видно: запрос «умного» тира обслуживала дешёвая модель.",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Tier mismatches (answers by the wrong tier)",
+   "gridPos": {
+    "x": 8,
+    "y": 18,
+    "w": 8,
+    "h": 7
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_model_tier_mismatch_1h",
+     "legendFormat": "{{tier}}"
+    }
+   ],
+   "description": "Запросы, где ответил не тот тир, что просили.",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 1
+       },
+       {
+        "color": "red",
+        "value": 5
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Healthy LLM providers per tier",
+   "gridPos": {
+    "x": 16,
+    "y": 18,
+    "w": 8,
+    "h": 7
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_llm_tier_healthy_providers",
+     "legendFormat": "{{tier}}"
+    }
+   ],
+   "description": "Ноль означает, что тир не может ответить и запрос уедет к модели другого тира.",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Backup age, hours",
+   "gridPos": {
+    "x": 0,
+    "y": 25,
+    "w": 6,
+    "h": 5
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_backup_age_hours",
+     "legendFormat": "age"
+    }
+   ],
+   "description": "Свежесть последнего бэкапа; −1 = бэкапов нет.",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 48
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Restore drill: OK and age",
+   "gridPos": {
+    "x": 6,
+    "y": 25,
+    "w": 6,
+    "h": 5
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_restore_drill_ok",
+     "legendFormat": "ok"
+    }
+   ],
+   "description": "1 = последнее учение по восстановлению прошло. Учение идёт раз в месяц.",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Guard drift (containers, wiring)",
+   "gridPos": {
+    "x": 12,
+    "y": 25,
+    "w": 6,
+    "h": 5
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_container_limit_drift",
+     "legendFormat": "container"
+    }
+   ],
+   "description": "Дрейф лимитов контейнеров и разводки агентов: 0 — норма.",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Owner ratings: 👎 share, %",
+   "gridPos": {
+    "x": 18,
+    "y": 25,
+    "w": 6,
+    "h": 5
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "hermes_feedback_down_share_24h",
+     "legendFormat": "доля 👎"
+    }
+   ],
+   "description": "Больше 30% при ≥5 оценках за сутки — правило HermesAnswerQualityDrop.",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 15
+       },
+       {
+        "color": "red",
+        "value": 30
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Repeating failures (worst agent)",
+   "gridPos": {
+    "x": 0,
+    "y": 30,
+    "w": 6,
+    "h": 5
+   },
+   "targets": [
+    {
+     "type": "prometheus",
+     "uid": "prometheus",
+     "refId": "A",
+     "expr": "max(hermes_agent_repeat_failures)",
+     "legendFormat": "повторов"
+    }
+   ],
+   "description": "Сколько раз повторяется один и тот же сбой за неделю.",
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 2
+       },
+       {
+        "color": "red",
+        "value": 3
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
   }
  ]
 }

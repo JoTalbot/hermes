@@ -1,6 +1,8 @@
 ---
 name: disk-gate
 description: Refuse an install, pull or download when the root filesystem cannot hold it, and say why in one line. Use before any step that writes more than ~100 MB (pip install, docker pull, model/browser download).
+capability: Проверять свободное место перед шагом, который пишет больше ~100 МБ, и отказывать с однострочной причиной вместо падения на середине.
+bounds: Не удаляет и не чистит файлы сам; не решает за владельца, что можно удалить, и не подменяет собой бэкап.
 ---
 # Why
 On `arm-server-01` the root filesystem sat at 98% (3.8 G free) during this audit. `pip install`,

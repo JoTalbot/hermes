@@ -1,6 +1,8 @@
 ---
 name: octopus-skill-catalog
 description: Pointer to the 243 existing Octopus skills and how to search them, so they are reused instead of reimplemented. Use when a task looks like something this ecosystem has already automated (alerting, drills, backup, scheduling, triage, memory).
+capability: Указывать на существующий каталог скиллов Octopus и способы поиска по нему, чтобы не изобретать уже сделанное заново.
+bounds: Только чтение: чужие скиллы не копируются, не правятся и не удаляются без согласия владельца чужого проекта.
 ---
 # Why
 `/root/agents/-Octopus/skills/` holds a large, older skill library written for the Octopus project. Duplicating any of it inside Hermes creates **two truths** for the same operation, which is exactly what the "skills-first" rule exists to prevent. This skill is the pointer, not a copy: it stays small in the prompt while making the catalogue findable.

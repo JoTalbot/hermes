@@ -1,3 +1,5 @@
+  план: /opt/hermes/docs/SKILLS-TODO.md
+  наших скиллов без прав: 0 из 12
 # Скиллы: что нужно доделать (сгенерировано scripts/audit-skills.sh --plan)
 
 Всего SKILL.md: 261 (наших 12, под /root/agents 249). Ничего не удалено — это план для решения владельца.
@@ -17,18 +19,7 @@
 
 ## Наши скиллы без объявленных прав
 
-- /opt/hermes/skills/ecosystem/response-format-ru/SKILL.md — нет: capability, bounds
-- /opt/hermes/skills/federation-node-join/SKILL.md — нет: capability, bounds
-- /opt/hermes/skills/multiagent/agent-chat-rooms/SKILL.md — нет: capability, bounds
-- /opt/hermes/skills/multiagent/skills-first/SKILL.md — нет: capability, bounds
-- /opt/hermes/skills/multiagent/octopus-skill-catalog/SKILL.md — нет: capability, bounds
-- /opt/hermes/skills/multiagent/step-status-protocol/SKILL.md — нет: capability, bounds
-- /opt/hermes/skills/backup/disk-gate/SKILL.md — нет: capability, bounds
-- /opt/hermes/skills/agent-bus/SKILL.md — нет: capability, bounds
-- /opt/hermes/skills/agent-handlers/SKILL.md — нет: capability, bounds
-- /opt/hermes/skills/server/oci-cloud-firewall/SKILL.md — нет: capability, bounds
-- /opt/hermes/skills/chatgpt/chatgpt-ui-driver/SKILL.md — нет: capability, bounds
-- /opt/hermes/skills/chatgpt/chatgpt-backend-export/SKILL.md — нет: capability, bounds
+- нет: у всех наших скиллов объявлены и возможности, и границы
 
 ## Скиллы под /root/agents без объявленных прав
 

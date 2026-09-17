@@ -1,6 +1,8 @@
 ---
 name: federation-node-join
 description: Add a new server/container as a Hermes node on the Agent Bus (clone → bootstrap → register → wire → verify), and diagnose a node that joined but is not answering. Use for multi-server work, peer nodes, or when a node must be rebuilt from GitHub.
+capability: Подключать новый сервер или контейнер к шине (clone → bootstrap → register → wire → verify) и диагностировать «узел присоединился, но не отвечает».
+bounds: Не переносит секреты: на новую машину едут только URL репозитория и токен шины; чужие узлы не пересобираются без согласия владельца.
 ---
 
 # Join a node to the federation

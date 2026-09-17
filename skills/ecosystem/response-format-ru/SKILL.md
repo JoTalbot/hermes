@@ -1,6 +1,8 @@
 ---
 name: response-format-ru
 description: The owner-mandated answer format for this ecosystem - bullet lists, section order, the emoji dictionary and the agent report template. Use when producing any report, status or answer for the owner.
+capability: Формат ответов агентов по-русски: вывод строкой, пункты с числами, эмодзи и строка «что делать».
+bounds: Не подменяет содержание и не заменяет измерения: формат применяется к фактам, которые собраны обработчиком, а не вместо них.
 ---
 # Why
 Two standing directives, both marked "ОБЯЗАТЕЛЬНАЯ СИСТЕМНАЯ ДИРЕКТИВА ДЛЯ ВСЕХ ИИ-АГЕНТОВ": `#70` (format: bullet lists + emoji) and `/root/agents/001-GENERAL.md` (+ `TEMPLATE.md` as the reference example). They came from the owner directly and apply to every agent and every project of the Octopus/AIOS ecosystem — ChatGPT, Claude, Gemini, Codex, Arena and the Hermes profiles alike.

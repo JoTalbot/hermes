@@ -1,6 +1,8 @@
 ---
 name: agent-bus
 description: Send, read and route messages between agents and nodes on the Hermes Agent Bus (NATS JetStream + local kanban mirror). Use when an agent must talk to another agent, ask another node something, broadcast a decision, or read the shared chat history.
+capability: Читать, отправлять и маршрутизировать сообщения агентов и узлов через Agent Bus (NATS JetStream + канбан-зеркало) командой hermes-bus.
+bounds: Не публикует в subjects напрямую и не хранит токен шины в коде или в скилле; без живой шины кросс-узловая доставка не работает — доступен только локальный канбан.
 ---
 
 # Agent Bus

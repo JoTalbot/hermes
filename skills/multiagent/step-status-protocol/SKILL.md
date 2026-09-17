@@ -1,6 +1,8 @@
 ---
 name: step-status-protocol
 description: Record step-level status so parallel agents on different machines can see what is happening right now. Use at the start and end of every substantive step in the Octopus/AIOS ecosystem, or whenever more than one agent may be editing the same repo or server.
+capability: Писать статус шага в общие поверхности, чтобы параллельные агенты с разных машин видели, что происходит прямо сейчас.
+bounds: Не подменяет журнал проекта и не является доской задач; секреты и внутренние рассуждения моделей в статус не пишутся.
 ---
 # Why
 This ecosystem is worked on **concurrently by heterogeneous agents** — ChatGPT, Claude, Gemini, Codex, Arena, local runtimes — from different machines. Undocumented local progress is invisible progress: nothing in a repo tells you that another agent is halfway through an edit. The owner made step status a **mandatory directive**, not a nicety: instruction `#57 §2` ("ПОШАГОВОЕ СОХРАНЕНИЕ СТАТУСА РАБОТЫ") and `/root/agents/005-MULTIAGENT-PARALLEL-SKILLS.md §2`.

@@ -60,12 +60,27 @@ echo "  destination  : $DEST (keep=$KEEP)"
 
 # --- 1. Hermes runtime state (sessions/memory/kanban/skills), secrets EXCLUDED -
 STATE_ARCHIVE="$DEST/hermes-state-$STAMP.tar.gz"
-tar --create --gzip \
+# FACT (2026-09-17): ночной бэкап падал на «file changed as we read it» — это нормальное
+# поведение живой системы, но tar возвращал 1, set -e убивал скрипт, и бэкап оставался
+# наполовину (без архива конфига узла), молча. --warning=no-file-changed снимает этот
+# случай, а код ≥2 по-прежнему фатален — но теперь мы отличаем одно от другого явно.
+set +e
+tar --create --gzip --warning=no-file-changed \
     --exclude='*/.env' --exclude='*/.env.*' --exclude='*.pem' --exclude='authorized_keys' \
     --exclude='*/logs/*' --exclude='*/cache/*' --exclude='*/audio_cache/*' --exclude='*/image_cache/*' \
     --file="$STATE_ARCHIVE" \
-    "$STATE_DIR"
-# No `|| echo` here: if tar fails, the whole backup is a lie and we must say so.
+    "$STATE_DIR" 2> "$DEST/.tar-state-$STAMP.err"
+TAR_RC=$?
+set -e
+if (( TAR_RC == 1 )); then
+    echo "  WARN: tar сообщил об изменённых во время чтения файлах (штатно для живой системы):" 
+    tail -3 "$DEST/.tar-state-$STAMP.err" | sed 's/^/        /'
+elif (( TAR_RC >= 2 )); then
+    echo "FATAL: tar не смог создать архив (код $TAR_RC):" >&2
+    tail -5 "$DEST/.tar-state-$STAMP.err" >&2
+    exit 2
+fi
+rm -f "$DEST/.tar-state-$STAMP.err"
 ARCHIVED=$(tar -tzf "$STATE_ARCHIVE" | wc -l)
 echo "  state archive: $(basename "$STATE_ARCHIVE") — $ARCHIVED entries, $(du -h "$STATE_ARCHIVE" | cut -f1)"
 if (( ARCHIVED < MIN_ENTRIES )); then
@@ -83,6 +98,7 @@ fi
 # Secrets stay OUT: telegram.env, nats.env, shim.env, dashboard.env, *.password,
 # git-credentials are never copied here (see the include list — it is explicit, not a glob).
 NODECFG_ARCHIVE="$DEST/hermes-nodecfg-$STAMP.tar.gz"
+NODECFG_COUNT=0
 STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/etc/hermes" "$STAGE/var/lib/hermes-bus" "$STAGE/var/lib/hermes-agents"
 NFT=0
@@ -100,6 +116,7 @@ done
 copy_if "/var/lib/hermes-agents/pending.json" "$STAGE/var/lib/hermes-agents/pending.json"
 if (( NFT > 0 )); then
     tar --create --gzip --file="$NODECFG_ARCHIVE" -C "$STAGE" .
+    NODECFG_COUNT=$NFT
     echo "  nodecfg archive: $(basename "$NODECFG_ARCHIVE") — $NFT файлов "\
          "($(du -h "$NODECFG_ARCHIVE" | cut -f1)); секреты не входят"
 else
@@ -130,13 +147,35 @@ ls -1t "$DEST"/hermes-state-*.tar.gz 2>/dev/null | tail -n +$((KEEP+1)) | xargs 
 ls -1t "$DEST"/hermes-config-*.tar.gz 2>/dev/null | tail -n +$((KEEP+1)) | xargs -r rm -f
 
 # --- 5. integrity: a backup you never opened is a rumour -----------------------
+BAD=0; MADE=0
 for a in "$DEST"/hermes-*-$STAMP.tar.gz; do
     [[ -f "$a" ]] || continue
+    MADE=$((MADE + 1))
     if tar -tzf "$a" >/dev/null 2>&1; then
         echo "  verified: $(basename "$a") ($(du -h "$a" | cut -f1), $(tar -tzf "$a" | wc -l) entries)"
     else
         echo "  CORRUPT: $a" >&2
-        exit 1
+        BAD=$((BAD + 1))
     fi
 done
+
+# --- 6. собственный вердикт бэкапа, чтобы провал был виден метрикой ---
+# DECISION (2026-09-17): «сколько архивов» недостаточно. Нужен ответ на вопрос «бэкап отработал?»,
+# иначе половина бэкапа без архива конфига узла выглядит как нормальный бэкап.
+STATE_JSON="${HERMES_BACKUP_STATE:-/var/lib/hermes-bus/backup-last.json}"
+if (( BAD == 0 && MADE >= 1 )); then RC=0; else RC=1; fi
+python3 - "$STATE_JSON" "$STAMP" "$MADE" "$BAD" "$RC" "$ARCHIVED" "${NODECFG_COUNT:-0}" <<'PY'
+import json, os, sys, time
+state, stamp, made, bad, rc, entries, nodecfg = sys.argv[1:8]
+os.makedirs(os.path.dirname(state), exist_ok=True)
+json.dump({"ts": int(time.time()), "stamp": stamp, "ok": rc == "0",
+           "archives": int(made), "corrupt": int(bad), "entries": int(entries or 0),
+           "nodecfg_files": int(nodecfg or 0),
+           "expected": ["hermes-state", "hermes-nodecfg", "hermes-config"]},
+          open(state, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+print(f"  вердикт бэкапа: {'OK' if rc == '0' else 'FAILED'} · архивов {made} · файлов конфига узла {nodecfg} · {state}")
+PY
+# Вердикт читает экспортёр метрик (свой пользователь), секретов в нём нет — только числа.
+chmod 0644 "$STATE_JSON" 2>/dev/null || true
+(( RC == 0 )) || exit 1
 echo "backups in $DEST (keep=$KEEP). Secrets and databases are intentionally NOT in here."

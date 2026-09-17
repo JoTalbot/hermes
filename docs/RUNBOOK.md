@@ -739,6 +739,74 @@ for the owner, it deletes nothing.
    the live gate could not see the empty state. Both fixed; the live ratings check now runs on a
    fixture and on the node's file.
 
+## Owner batch 1–6: escalation, ratings, drill, repeats, quality, skill rights (2026-09-17)
+
+**1. A failed tier escalates to a smarter one before degrading.** Order in `models.ask`:
+requested tier → smart backup (`hermes-code → hermes-long`, `fast → reason`, `long → reason`,
+`local → fast`, `auto → long`) → local model → facts only. Chains are acyclic and at most two steps
+(the live case for a dead tier is measured to be 0 in 24 h, so the expensive path stays rare), and
+the answer says it out loud: `модель hermes-code · gemini-gemini-2.5-flash [long_context] · резерв
+hermes-long (основной тир не ответил)`. `bash -c` on the chain is a test, not a promise:
+`tests/run.sh` walks every chain and fails on a cycle.
+
+**2. Every 👎 becomes a regression question.** `bash scripts/feedback-to-eval.sh` copies the rated
+question into `tests/eval-feedback.tsv` (question, capability, handler, subject, date, the answer
+that was rated), and `scripts/eval-agents.sh` loads that file, so the set grows from the owner's
+real ratings instead of my guesses. Honest limit: the expectation recorded is the route **at the
+moment of the rating** — a regression guard for routing, not proof that the answer itself was
+right. The digest timer runs this daily (`ExecStartPre`), `--check` shows what would be added,
+`--list` shows what is inside.
+
+**3. The restore drill is automatic.** `bash scripts/install-restore-drill.sh` installs
+`hermes-restore-drill.timer` (1st of the month, 04:30 UTC, after the nightly backup). The drill
+picks the newest state archive, verifies it with `scripts/verify-backup.sh`, unpacks it into a
+scratch dir, checks the files that make a restore worth anything (`config.yaml`, kanban, memory,
+profile `memories/`), checks the **node-config archive** separately (`hermes-nodecfg-*.tar.gz` —
+the chat allowlist and the bus state, without which a restored node ignores its owner), proves that
+`restore.sh` refuses to overwrite a non-empty home, and sends the verdict to Telegram:
+`DRILL: PLAUSIBLE` or `DRILL: FAILED` with the list of problems. Result is exported as
+`hermes_restore_drill_ok/age_hours/files` with two rules (`HermesRestoreDrillFailed`,
+`HermesRestoreDrillStale` > 35 days). What it does NOT do: install units and run the restored node —
+that stays the separate drill on `node-arm-03`, because doing it on prod is not allowed.
+
+**4. Repeating failures are counted, remembered and alerted.** `bash agents/checks/repeats.sh`
+groups failed runs by agent + handler + a normalised reason and prints which ones repeat; with
+`ARG_WRITE=1` it appends a weekly block to `memory/incidents/REPEATS.md` (gitignored — measured
+state, not code), so the next investigation starts with history. Metric
+`hermes_agent_repeat_failures{agent}`, rule `HermesRepeatedFailure` (≥3 times a week), a line in the
+digest, and the question «что повторяется» routes there.
+
+**5. Answer quality has its own alert and its own panels.** `hermes_feedback_down_share_24h` and
+`hermes_feedback_down_24h` are exported, and `HermesAnswerQualityDrop` fires when at least 5 ratings
+land in a day and more than 30% of them are 👎. The Grafana dashboard grew to 20 panels: who
+actually answers (tier/provider), tier mismatches, healthy providers per tier, backup age, restore
+drill, guard drift, 👎 share, worst repeating failure.
+
+**6. Our 12 skills declare their rights.** Every skill under `/opt/hermes/skills` now carries
+`capability:` (what it actually does) and `bounds:` (what it does not do) in its frontmatter —
+written from the skill's real behaviour, not to silence the checker. `bash scripts/audit-skills.sh
+--strict` now reports `наших скиллов без прав: 0 из 12` and exits 0; the 249 skills of the Octopus
+project stay untouched (someone else's work, the owner's decision).
+
+```bash
+bash scripts/drill-restore.sh --check        # когда было учение и чем кончилось
+bash scripts/feedback-to-eval.sh --list      # вопросы, пришедшие из оценок 👎
+ARG_DAYS=30 bash agents/checks/repeats.sh    # что повторяется и почему
+bash scripts/audit-skills.sh --strict        # права скиллов (exit 0 = все объявлены)
+```
+
+**Found by this batch — the nightly backup had been failing silently.** The journal for
+2026-09-17 03:43:46 says `tar: /home/hermes/.hermes: file changed as we read it` and
+`hermes-backup.service: Failed with result 'exit-code'`. Under `set -e` tar's exit code 1 (normal
+for a live system) killed the script half-way: the state archive was written, the **node-config
+archive with the chat allowlist was not**, pruning never ran, and `ExecStartPost` verification was
+skipped. No alert fired — `hermes_backup_count` counted state archives and was perfectly happy.
+Fixed: `--warning=no-file-changed` plus explicit exit-code semantics (1 = warning, ≥2 = fatal), a
+verdict file `/var/lib/hermes-bus/backup-last.json` written by the backup itself and exported as
+`hermes_backup_last_ok` / `hermes_backup_nodecfg_files`, and the critical rule
+`HermesBackupRunFailed`. Verified live: the next run produced all three archives (588 + 13 + 176
+entries), the verdict says OK, and the drill now passes.
+
 ## Seeing the LLM: which models answer, and who is alive (2026-09-17, second pass)
 
 `bash agents/checks/models.sh` answers «какие модели отвечают» in one command, and it spends no

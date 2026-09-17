@@ -532,7 +532,9 @@ ck "core checks now cite their commands" "report_proof" \
 # живое: прогон «понимает ли система вопросы владельца»
 if [[ -x .venv-bus/bin/python ]]; then
   EV="$(bash scripts/eval-agents.sh 2>&1 | tail -1)"
-  ck "live: every sample question reaches the right agent" "22 из 22" "$EV"
+  ck "live: every sample question reaches the right agent" "сбоев 0" "$EV"
+  ck "live: the built-in question set is intact" "встроенных вопросов 22" \
+     "$(bash scripts/eval-agents.sh 2>&1 | grep -o 'встроенных вопросов 22' | head -1)"
   OUT7="$(bash agents/checks/journal-top.sh 2>&1 | head -3 | tr '\n' ' ')"
   ck "live: journal-top runs on this node" "КТО ПИШЕТ В ЖУРНАЛ" "$OUT7"
   # Фикстура, а не боевой файл: тест не должен писать в то, что проверяет.
@@ -548,6 +550,8 @@ if [[ -x .venv-bus/bin/python ]]; then
   rm -rf "$FBDIR"
   OUTM="$(bash agents/checks/models.sh 2>&1 | tail -1)"
   ck "live: the models report renders on this node" "ИТОГ" "$OUTM"
+  OUTR="$(ARG_DAYS=30 bash agents/checks/repeats.sh 2>&1 | tail -1)"
+  ck "live: the repeats report renders on this node" "ИТОГ" "$OUTR"
 else
   ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); echo "  ~ live eval checks skipped (нет venv шины)"
 fi
@@ -574,6 +578,89 @@ ck "the shim knows which tier each provider belongs to" "provider_tier" \
    "$(grep -o 'provider_tier' deploy/shim/aios_openai_shim.py | head -1)"
 ck "an off-tier provider counts as a mismatch" "provider_off" \
    "$(grep -o 'provider_off' deploy/shim/aios_openai_shim.py | head -1)"
+ck "a failed tier goes to a smarter backup before degrading" "escalation_target" \
+   "$(grep -o 'escalation_target' agents/models.py | head -1)"
+ck "the answer says when a backup tier answered" "резерв" \
+   "$(grep -o 'резерв {meta' agents/runtime.py | head -1)"
+ESC="$(./.venv-bus/bin/python - <<'PY' 2>/dev/null
+import sys
+sys.path.insert(0, "agents")
+import models
+ok = True
+for start in list(models.ESCALATE_TO) + ["hermes-fast", "hermes-reason"]:
+    seen, cur, steps = set(), start, 0
+    while (nxt := models.escalation_target(cur)):
+        if nxt in seen or steps > 3:
+            ok = False
+            break
+        seen.add(nxt); cur, steps = nxt, steps + 1
+print("цепочки-резерва-ок" if ok and models.escalation_target("hermes-code") == "hermes-long"
+      else "цепочки-резерва-СЛОМАНЫ")
+PY
+)"
+ck "backup chains are acyclic and bounded" "цепочки-резерва-ок" "$ESC"
+ck "the exporter measures the share of bad ratings" "hermes_feedback_down_share_24h" \
+   "$(grep -o 'hermes_feedback_down_share_24h' scripts/hermes_metrics_exporter.py | head -1)"
+ck "a quality drop raises an alert" "HermesAnswerQualityDrop" \
+   "$(grep -o 'HermesAnswerQualityDrop' deploy/monitoring/hermes-agents.rules.yml | head -1)"
+ck "the dashboard shows who answers and who is broken" "Model answers by tier and provider" \
+   "$(grep -o 'Model answers by tier and provider' deploy/monitoring/hermes-agents-dashboard.json | head -1)"
+ck "the dashboard shows ratings and drills" "Owner ratings" \
+   "$(grep -o 'Owner ratings' deploy/monitoring/hermes-agents-dashboard.json | head -1)"
+ck "repeated failures are reported as repeats" "ПОВТОРЯЮЩИЕСЯ СБОИ" \
+   "$(grep -o 'ПОВТОРЯЮЩИЕСЯ СБОИ' agents/checks/repeats.sh | head -1)"
+ck "repeats are written to memory, not only shown" "REPEATS.md" \
+   "$(grep -o 'REPEATS.md' agents/checks/repeats.sh | head -1)"
+ck "repeats are visible as a metric" "hermes_agent_repeat_failures" \
+   "$(grep -o 'hermes_agent_repeat_failures' scripts/hermes_metrics_exporter.py | head -1)"
+ck "a repeating failure raises an alert" "HermesRepeatedFailure" \
+   "$(grep -o 'HermesRepeatedFailure' deploy/monitoring/hermes-agents.rules.yml | head -1)"
+ck "a question about repeats reaches the repeats report" '"повторяющиеся сбои", "repeats"' \
+   "$(grep -o '"повторяющиеся сбои", "repeats"' agents/routing.py | head -1)"
+ck "the server agent owns the repeats report" '"repeats": f"bash {CHECKS}/repeats.sh"' \
+   "$(grep -o '"repeats": f"bash {CHECKS}/repeats.sh"' scripts/wire-agents.sh | head -1)"
+ck "a live tar that warns about changed files is not a failure" "no-file-changed" \
+   "$(grep -o 'no-file-changed' scripts/backup.sh | head -1)"
+ck "the backup writes its own verdict" "backup-last.json" \
+   "$(grep -o 'backup-last.json' scripts/backup.sh | head -1)"
+ck "the verdict is exported as a metric" "hermes_backup_last_ok" \
+   "$(grep -o 'hermes_backup_last_ok' scripts/hermes_metrics_exporter.py | head -1)"
+ck "a failed backup run is a critical alert" "HermesBackupRunFailed" \
+   "$(grep -o 'HermesBackupRunFailed' deploy/monitoring/hermes-agents.rules.yml | head -1)"
+ck "the restore drill is automated" "hermes-restore-drill.timer" \
+   "$(grep -o 'hermes-restore-drill.timer' scripts/install-restore-drill.sh | head -1)"
+ck "the drill refuses to claim success it did not verify" "DRILL: PLAUSIBLE" \
+   "$(grep -o 'DRILL: PLAUSIBLE' scripts/drill-restore.sh | head -1)"
+ck "the drill checks the chat allowlist comes back" "telegram.chats.json" \
+   "$(grep -o 'telegram.chats.json' scripts/drill-restore.sh | head -1)"
+ck "the drill looks into the node-config archive, not the state one" "hermes-nodecfg" \
+   "$(grep -o 'hermes-nodecfg' scripts/drill-restore.sh | head -1)"
+ck "the drill accepts that live files change after a backup" "изменился после бэкапа" \
+   "$(grep -o 'изменился после бэкапа' scripts/verify-backup.sh | head -1)"
+ck "the drill checks restore refuses to overwrite" "REFUSING" \
+   "$(grep -o 'REFUSING' scripts/drill-restore.sh | head -1)"
+ck "drill state is exported as a metric" "hermes_restore_drill_ok" \
+   "$(grep -o 'hermes_restore_drill_ok' scripts/hermes_metrics_exporter.py | head -1)"
+ck "a stale drill is an alert" "HermesRestoreDrillStale" \
+   "$(grep -o 'HermesRestoreDrillStale' deploy/monitoring/hermes-agents.rules.yml | head -1)"
+ck "an unverified backup is an alert" "HermesRestoreDrillFailed" \
+   "$(grep -o 'HermesRestoreDrillFailed' deploy/monitoring/hermes-agents.rules.yml | head -1)"
+ck "a rating can be turned into a regression question" "feedback-to-eval" \
+   "$(grep -o 'feedback-to-eval' scripts/feedback-to-eval.sh | head -1)"
+ck "the eval reads the questions that were rated badly" "FEEDBACK_CASES" \
+   "$(grep -o 'FEEDBACK_CASES' scripts/eval-agents.sh | head -1)"
+ck "the digest timer turns ratings into questions" "feedback-to-eval.sh" \
+   "$(grep -o 'feedback-to-eval.sh' scripts/install-digest.sh | head -1)"
+FBQ="$(mktemp -d)"
+printf '%s\n' '{"epoch": 1, "verdict": "down", "question": "почему падает контейнер логистики", "answer": "не знаю"}' \
+  '{"epoch": 2, "verdict": "up", "question": "диски", "answer": "ok"}' > "$FBQ/fb.jsonl"
+OUTQ="$(HERMES_FEEDBACK_FILE="$FBQ/fb.jsonl" HERMES_EVAL_FEEDBACK_FILE="$FBQ/eval.tsv" \
+        REPO_DIR="$REPO_ROOT" bash scripts/feedback-to-eval.sh 2>&1 | head -1)"
+ck "a bad rating becomes one question, an upvote does not" "добавлено 1 вопрос" "$OUTQ"
+OUTQ2="$(HERMES_FEEDBACK_FILE="$FBQ/fb.jsonl" HERMES_EVAL_FEEDBACK_FILE="$FBQ/eval.tsv" \
+        REPO_DIR="$REPO_ROOT" bash scripts/feedback-to-eval.sh 2>&1 | head -1)"
+ck "the same rating is not added twice" "новых оценок 👎 нет" "$OUTQ2"
+rm -rf "$FBQ"
 ck "the exporter asks the balancer about provider health" "probe_balancer" \
    "$(grep -o 'probe_balancer' scripts/hermes_metrics_exporter.py | head -1)"
 ck "provider health is exported per provider" "hermes_llm_provider_healthy" \
@@ -633,7 +720,7 @@ PY
     ((SKIP++)); echo "  ~ AIOS bridge check skipped (файла нет на этом хосте)"
   fi
 else
-  ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); echo "  ~ live model telemetry checks skipped (нет venv шины)"
+  ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); echo "  ~ live model telemetry checks skipped (нет venv шины)"
 fi
 
 

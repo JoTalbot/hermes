@@ -644,6 +644,9 @@ class Runtime:
             served_note += f" [{meta['served_tier']}]"
         if meta.get("tier_mismatch"):
             served_note += " ⚠️ ответил не тот тир"
+        # Эскалация видна владельцу: он должен знать, что ответ дал резерв, а не заказанный тир.
+        if meta.get("escalated_to"):
+            served_note += f" · резерв {meta['escalated_to']} (основной тир не ответил)"
         meta_line = (f"модель {meta.get('model')}{served_note} ({why}) · "
                      f"{meta.get('latency_ms', 0)} мс")
         # Телеметрия модели: какой тир был выбран, ответил ли он и не пришлось ли падать
@@ -663,6 +666,7 @@ class Runtime:
             "served_tier": meta.get("served_tier") or "",
             "provider": meta.get("provider") or "",
             "provider_tier": meta.get("provider_tier") or "",
+            "escalated_to": meta.get("escalated_to") or "",
             "cached": bool(meta.get("cached")),
             "tier_mismatch": bool(meta.get("tier_mismatch")),
             "fallback": meta.get("fallback") or (f"escalated from {meta['escalated_from']}"

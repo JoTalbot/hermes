@@ -164,6 +164,12 @@ PY
 fi
 
 # ── 3c. модели: кто отвечал и не теряется ли умность ─────────────────────────
+REP="$(ARG_DAYS=7 bash "$(dirname "${BASH_SOURCE[0]}")/repeats.sh" 2>/dev/null | tail -1)"
+if [[ -n "$REP" ]]; then
+  report_section "🔁 ЧТО ПОВТОРЯЕТСЯ"
+  report_info "${REP#ИТОГ: }"
+fi
+
 report_section "🧠 МОДЕЛИ"
 HIST_FILE="${HIST:-/var/lib/hermes-agents/history.jsonl}" python3 - <<'PY'
 import json, os, time

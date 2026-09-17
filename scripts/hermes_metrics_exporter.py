@@ -553,6 +553,9 @@ def probe_agent_history() -> list[str]:
         "# TYPE hermes_agent_runs_total counter",
         "# HELP hermes_agent_failures_1h Failed handler runs per agent in the last hour",
         "# TYPE hermes_agent_failures_1h gauge",
+        # FACT (2026-09-17): разовый отказ и отказ, повторяющийся неделю, — разные вещи.
+        "# HELP hermes_agent_repeat_failures Most repeats of one failure reason (7 days)",
+        "# TYPE hermes_agent_repeat_failures gauge",
         "# HELP hermes_agent_duration_p95_ms 95th percentile handler duration per agent",
         "# TYPE hermes_agent_duration_p95_ms gauge",
         "# HELP hermes_agent_last_run_timestamp_seconds Unix time of the agent's last run",
@@ -572,7 +575,8 @@ def probe_agent_history() -> list[str]:
                 except ValueError:
                     continue
                 name = str(r.get("agent", "?"))
-                a = per.setdefault(name, {"runs": 0, "fail1h": 0, "dur": [], "last": 0})
+                a = per.setdefault(name, {"runs": 0, "fail1h": 0, "dur": [], "last": 0,
+                                          "reasons": {}})
                 a["runs"] += 1
                 total += 1
                 a["dur"].append(int(r.get("took_ms") or 0))
@@ -580,6 +584,11 @@ def probe_agent_history() -> list[str]:
                 a["last"] = max(a["last"], epoch)
                 if int(r.get("code") or 0) != 0 and now - epoch <= 3600:
                     a["fail1h"] += 1
+                if int(r.get("code") or 0) != 0 and now - epoch <= 7 * 86400:
+                    # Причину нормализуем: числа и время не должны делать один сбой разными.
+                    reason = re.sub(r"\d+", "<n>", str(r.get("summary") or "")[:80])
+                    a["reasons"][(str(r.get("handler") or "?"), reason)] = \
+                        a["reasons"].get((str(r.get("handler") or "?"), reason), 0) + 1
     except OSError:
         out.append("hermes_agent_history_present 0")
         return out
@@ -593,6 +602,9 @@ def probe_agent_history() -> list[str]:
         out.append(f"hermes_agent_failures_1h{lbl} {a['fail1h']}")
         out.append(f"hermes_agent_duration_p95_ms{lbl} {p95}")
         out.append(f"hermes_agent_last_run_timestamp_seconds{lbl} {a['last']}")
+        if a.get("reasons"):
+            top = max(a["reasons"].values())
+            out.append(f"hermes_agent_repeat_failures{lbl} {top}")
     return out
 
 
@@ -758,6 +770,35 @@ def probe_project_staleness() -> list[str]:
 
 
 
+def probe_restore_drill() -> list[str]:
+    """Когда было учение по восстановлению и чем кончилось.
+
+    FACT (2026-09-17): первый дрилл нашли четыре молчаливых дефекта восстановления, но делался он
+    руками и один раз. Метрика нужна, чтобы «учение не проводилось полгода» было видно числом.
+    """
+    out = [
+        "# HELP hermes_restore_drill_ok 1 if the last restore drill found the backup restorable",
+        "# TYPE hermes_restore_drill_ok gauge",
+        "# HELP hermes_restore_drill_age_hours Hours since the last restore drill",
+        "# TYPE hermes_restore_drill_age_hours gauge",
+        "# HELP hermes_restore_drill_files Files restored during the last drill",
+        "# TYPE hermes_restore_drill_files gauge",
+    ]
+    path = os.environ.get("HERMES_DRILL_STATE", "/var/lib/hermes-bus/restore-drill.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            d = json.load(fh)
+    except Exception:
+        out.append("hermes_restore_drill_ok 0")
+        out.append("hermes_restore_drill_age_hours -1")
+        return out
+    age = (time.time() - float(d.get("ts") or 0)) / 3600
+    out.append(f"hermes_restore_drill_ok {1 if d.get('ok') else 0}")
+    out.append(f"hermes_restore_drill_age_hours {age:.2f}")
+    out.append(f"hermes_restore_drill_files {int(d.get('files') or 0)}")
+    return out
+
+
 def probe_backup() -> list[str]:
     """Свежесть бэкапа: расписание есть, а если таймер отвалится — никто не заметит."""
     out = [
@@ -767,11 +808,31 @@ def probe_backup() -> list[str]:
         "# TYPE hermes_backup_count gauge",
         "# HELP hermes_backup_bytes Total size of the backup directory",
         "# TYPE hermes_backup_bytes gauge",
+        # FACT (2026-09-17): бэкап падал на «file changed as we read it» и оставлял половину
+        # наборов, а метрики видели только «архивов 5» — вердикт самого бэкапа нужен отдельно.
+        "# HELP hermes_backup_last_ok 1 if the last backup run finished and verified",
+        "# TYPE hermes_backup_last_ok gauge",
+        "# HELP hermes_backup_last_age_hours Hours since the last backup run verdict",
+        "# TYPE hermes_backup_last_age_hours gauge",
+        "# HELP hermes_backup_nodecfg_files Node-config files captured by the last backup",
+        "# TYPE hermes_backup_nodecfg_files gauge",
     ]
     import glob
     root = os.environ.get("HERMES_BACKUP_DIR", "/var/backups/hermes")
     files = glob.glob(os.path.join(root, "hermes-state-*.tar.gz"))
     out.append(f"hermes_backup_count {len(files)}")
+    # Вердикт последнего прогона бэкапа: «архивов N» не отвечает на вопрос «бэкап отработал?».
+    _st = os.environ.get("HERMES_BACKUP_STATE", "/var/lib/hermes-bus/backup-last.json")
+    try:
+        with open(_st, encoding="utf-8") as _fh:
+            _d = json.load(_fh)
+        out.append(f"hermes_backup_last_ok {1 if _d.get('ok') else 0}")
+        out.append("hermes_backup_last_age_hours "
+                   f"{(time.time() - float(_d.get('ts') or 0)) / 3600:.2f}")
+        out.append(f"hermes_backup_nodecfg_files {int(_d.get('nodecfg_files') or 0)}")
+    except Exception:
+        out.append("hermes_backup_last_ok 0")
+        out.append("hermes_backup_last_age_hours -1")
     if not files:
         out.append("hermes_backup_age_hours -1")
         return out
@@ -814,6 +875,11 @@ def probe_feedback() -> list[str]:
         "# TYPE hermes_feedback_total counter",
         "# HELP hermes_feedback_24h Ratings in the last 24 hours",
         "# TYPE hermes_feedback_24h gauge",
+        # DECISION (2026-09-17, пункт 5 владельца): доля 👎 выше порога — это тревога.
+        "# HELP hermes_feedback_down_share_24h Share of ratings that were negative, percent",
+        "# TYPE hermes_feedback_down_share_24h gauge",
+        "# HELP hermes_feedback_down_24h Negative ratings in the last 24 hours",
+        "# TYPE hermes_feedback_down_24h gauge",
     ]
     path = os.environ.get("HERMES_FEEDBACK_FILE", "/var/lib/hermes-agents/feedback.jsonl")
     up = down = up24 = down24 = 0
@@ -840,12 +906,16 @@ def probe_feedback() -> list[str]:
     out.append(f'hermes_feedback_total{{verdict="up"}} {up}')
     out.append(f'hermes_feedback_total{{verdict="down"}} {down}')
     out.append(f"hermes_feedback_24h {up24 + down24}")
+    out.append(f"hermes_feedback_down_24h {down24}")
+    total24 = up24 + down24
+    out.append(f"hermes_feedback_down_share_24h "
+               f"{(100.0 * down24 / total24) if total24 else 0.0:.1f}")
     return out
 
 
 PROBES = (probe_units, probe_host_pressure, probe_shim, probe_balancer, probe_agents, probe_bus,
           probe_github, probe_tailscale, probe_agent_bus, probe_bus_agents,
-          probe_projects, probe_agent_history, probe_model_telemetry,
+          probe_projects, probe_agent_history, probe_model_telemetry, probe_restore_drill,
           probe_guard_state, probe_project_staleness, probe_backup, probe_journal,
           probe_feedback)
 

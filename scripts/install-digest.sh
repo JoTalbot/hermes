@@ -45,6 +45,10 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+# Перед сводкой: оценки 👎 становятся вопросами регресс-набора (пункт 2 владельца).
+ExecStartPre=-/bin/bash /opt/hermes/scripts/feedback-to-eval.sh
+# И повторы сбоев — в память (одна запись на неделю, файл в .gitignore).
+ExecStartPre=-/bin/bash -c 'ARG_WRITE=1 /opt/hermes/agents/checks/repeats.sh >/dev/null'
 Type=oneshot
 WorkingDirectory=${HERMES_HOME}
 Environment=HERMES_HOME=${HERMES_HOME}

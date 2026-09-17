@@ -1,6 +1,8 @@
 ---
 name: oci-cloud-firewall
 description: Open or verify an inbound port on this OCI instance, where the CLOUD security list - not ufw - decides whether a packet ever arrives. Use when a port is allowed locally but unreachable from the internet.
+capability: Открывать и проверять входящий порт на OCI с учётом того, что пакет решает cloud security list, а ufw — только внутренний слой.
+bounds: Не меняет security list и не открывает порт в интернет без решения владельца: скилл печатает, что именно нужно сделать, и почему локальный тест этого не доказывает.
 ---
 # Why
 Setting the dashboard to `0.0.0.0:9119` and adding `ufw allow 9119/tcp` was **not enough**, and the

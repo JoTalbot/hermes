@@ -179,6 +179,29 @@ server-guardian agent owns the `models` handler; the digest has a «🧠 МОД�
 grew to 22 questions (models + providers) — **22 из 22**. `tests/run.sh` **256 passed · 0 failed ·
 0 skipped**, Prometheus **26 rules**.
 
+**Owner batch 1–6 (same day, fourth pass).** All six items are live on the node:
+(1) a failed tier escalates to a smarter backup before degrading (acyclic chains, visible in the
+answer as `резерв hermes-long`); (2) every 👎 becomes a regression question in
+`tests/eval-feedback.tsv` that `eval-agents.sh` reads, added automatically by the digest timer;
+(3) `bash scripts/drill-restore.sh` + monthly timer verify that a backup really restores —
+**DRILL: PLAUSIBLE**, 222 files, 3 s — and notify Telegram; (4) repeating failures are counted,
+written weekly to `memory/incidents/REPEATS.md`, exported and alerted; (5) quality has its own
+metric and alert (`hermes_feedback_down_share_24h`, `HermesAnswerQualityDrop`) and the dashboard
+grew to 20 panels; (6) all 12 of our skills now declare `capability:` and `bounds:`, so
+`audit-skills.sh --strict` is green (0 of 12 without rights).
+
+**The batch also found a real failure nobody could see: the nightly backup had been failing.**
+`tar: file changed as we read it` (exit 1) killed `backup.sh` under `set -e` at 03:43 — the state
+archive existed, the node-config archive with the chat allowlist did not, pruning and verification
+never ran, and no alert fired (the backup metric counted state archives only). Fixed with
+`--warning=no-file-changed`, explicit exit-code semantics, a verdict file exported as
+`hermes_backup_last_ok` and the critical rule `HermesBackupRunFailed`; the next run produced all
+three archives and the drill passes.
+
+**Numbers:** `tests/run.sh` **292 passed · 0 failed · 0 skipped**, eval **22 из 22 · сбоев 0**,
+Prometheus **31 rules**, dashboard **20 panels**, drill **PLAUSIBLE**, backup verdict **OK** (588 +
+13 + 176 entries, 6 node-config files).
+
 **Lesson from the batch:** after deploying agent code the unit must be restarted (Python caches
 imports at start); a fixed `routing.py` keeps answering by the old rules otherwise. `hermes-agents`
 had been running since 06:01:27 while the fixed routing landed at 06:17:30.

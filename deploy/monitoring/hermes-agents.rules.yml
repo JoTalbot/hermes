@@ -167,6 +167,80 @@ groups:
       # умности не видны в обычных метриках — ответы приходят, просто не те.
       # FACT (2026-09-17): у тира code не осталось рабочего провайдера, и это было не видно:
       # ответы приходили от модели другого тира. Тихий отказ тира — это тихая потеря качества.
+      # FACT (2026-09-17): бэкап без проверенного восстановления — это надежда, а не бэкап.
+      # Учение идёт раз в месяц; если оно не прошло или не запускалось 35 дней — это тревога.
+      # FACT (2026-09-17): один и тот же отказ повторялся неделю (secret-scan, backup status),
+      # и никто об этом не знал: каждая неудача выглядела разовой.
+      # DECISION (2026-09-17, пункт 5 владельца): качество измеряется оценками, и падение
+      # качества должно приходить само. Порог: ≥5 оценок за сутки и больше 30% из них — 👎.
+      - alert: HermesAnswerQualityDrop
+        expr: hermes_feedback_24h >= 5 and hermes_feedback_down_share_24h > 30
+        for: 30m
+        labels:
+          severity: warning
+          area: quality
+        annotations:
+          summary: "Оценки ответов ухудшились: {{ $value }}% из них 👎 за сутки"
+          description: >-
+            Владелец всё чаще оценивает ответы как неточные. Смотреть: bash agents/checks/feedback.sh
+            (какие вопросы не попали), bash agents/checks/models.sh (не отвечает ли модель другого
+            тира) и eval: bash scripts/eval-agents.sh. Частая причина — деградация тира модели.
+
+      - alert: HermesRepeatedFailure
+        expr: max by (agent) (hermes_agent_repeat_failures) >= 3
+        for: 1h
+        labels:
+          severity: warning
+          area: agents
+        annotations:
+          summary: "Один и тот же сбой у {{ $labels.agent }} повторяется {{ $value }} раз за неделю"
+          description: >-
+            Handler падает по одной и той же причине снова и снова. Разобрать историю:
+            «что повторяется» у агента или bash agents/checks/repeats.sh (там же причина),
+            полная история — bash agents/checks/history.sh.
+
+      # FACT (2026-09-17): ночной бэкап падал (tar: file changed as we read it) и оставлял
+      # набор без архива конфига узла — ни один алерт не сработал. Теперь сам бэкап говорит,
+      # отработал он или нет, и это critical: без nodecfg восстановленный узел игнорирует владельца.
+      - alert: HermesBackupRunFailed
+        expr: hermes_backup_last_ok == 0
+        for: 15m
+        labels:
+          severity: critical
+          area: recovery
+        annotations:
+          summary: "Бэкап не отработал полностью"
+          description: >-
+            Последний прогон бэкапа не создал полный набор архивов или нашёл повреждённый архив.
+            Проверить: cat /var/lib/hermes-bus/backup-last.json, journalctl -u hermes-backup.service
+            и bash agents/checks/backup-verify.sh. Частая причина — tar code 1 на живой системе.
+
+      - alert: HermesRestoreDrillFailed
+        expr: hermes_restore_drill_ok == 0
+        for: 15m
+        labels:
+          severity: warning
+          area: recovery
+        annotations:
+          summary: "Последнее учение по восстановлению НЕ прошло"
+          description: >-
+            Бэкап не разворачивается или в нём нет ключевых файлов. Пока это так, восстановление
+            узла из архива не подтверждено. Разобрать: bash scripts/drill-restore.sh --keep и
+            посмотреть список проблем в /var/lib/hermes-bus/restore-drill.json.
+
+      - alert: HermesRestoreDrillStale
+        expr: hermes_restore_drill_age_hours > 840
+        for: 30m
+        labels:
+          severity: warning
+          area: recovery
+        annotations:
+          summary: "Учение по восстановлению не проводилось более 35 дней"
+          description: >-
+            Таймер hermes-restore-drill.timer должен запускать учение 1-го числа каждого месяца.
+            Проверить: systemctl list-timers hermes-restore-drill.timer и
+            bash scripts/install-restore-drill.sh --check.
+
       - alert: HermesLLMTierNoProvider
         expr: sum by (tier) (hermes_llm_provider_healthy{tier=~"fast|reasoning|code|long_context|local"}) == 0
         for: 15m

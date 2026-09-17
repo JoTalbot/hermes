@@ -100,6 +100,7 @@ CORE = {
                   "services": f"bash {CHECKS}/guardian-services.sh",
                   "hermes": f"bash {CHECKS}/hermes-status.sh",
                   "models": f"bash {CHECKS}/models.sh",
+                  "repeats": f"bash {CHECKS}/repeats.sh",
                   "lookup": f"bash {CHECKS}/lookup.sh",
                   "history": f"bash {CHECKS}/history.sh",
                   "verify": f"bash {CHECKS}/verify-action.sh",
