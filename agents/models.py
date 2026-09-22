@@ -200,11 +200,16 @@ def ask(question: str, facts: str, agent_id: str, purpose: str = "", node: str =
     meta = {"model": model, "ok": False, "latency_ms": 0, "fallback": ""}
     key = _client_key()
     prompt = SYSTEM.format(agent=agent_id, node=node, purpose=purpose or "диагностика узла")
+    # FACT (2026-09-19, замер на node-arm-llm): промпт 5707 токенов модель qwen2.5:3b
+    # на 4 ARM-ядрах обрабатывает 173,6 с в первый проход и 0,5 с по кэшу промпта.
+    # Локальный тир при полном объёме фактов всегда упирался в таймаут провайдера,
+    # поэтому для него факты режутся жёстче: скорость важнее полноты контекста.
+    fact_limit = 900 if model == policy()["local"] else 6000
     body = {
         "model": model,
         "messages": [
             {"role": "system", "content": prompt},
-            {"role": "user", "content": f"ФАКТЫ:\n{facts[:6000]}\n\nВОПРОС: {question}"},
+            {"role": "user", "content": f"ФАКТЫ:\n{facts[:fact_limit]}\n\nВОПРОС: {question}"},
         ],
         "temperature": 0.2,
         "max_tokens": 700,
