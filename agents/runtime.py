@@ -490,9 +490,17 @@ class Runtime:
             args = dict(env["args"])
             handler = str(args.pop("handler", "") or env.get("handler", "") or "")
         if not handler:
-            parts = text.split()
-            handler = parts[0] if parts else "identity"
-            for tok in parts[1:]:
+            # FACT (2026-09-19): в общем канале сообщение addressed именно упоминанием
+            # («@node-arm-llm/server-guardian ask …»), а обработчик определялся по первому
+            # слову — то есть по самому упоминанию. Такой обработчик не существует, и агент
+            # молча не отвечал: разговор агентов в общем чате не работал. Упоминание — это
+            # адресат, а не команда, поэтому ведущие @-токены срезаются до разбора.
+            words = text.split()
+            while words and words[0].startswith("@"):
+                words.pop(0)
+            handler = words[0] if words else "identity"
+            text = " ".join(words)
+            for tok in words[1:]:
                 if "=" in tok:
                     k, v = tok.split("=", 1)
                     args[k] = v
@@ -616,6 +624,11 @@ class Runtime:
     async def answer_with_model(self, agent: Agent, env: dict, args: dict) -> dict:
         """Gather facts with the agent's own handler, then ask its model to explain them."""
         task = (env.get("text") or "").strip()
+        # Упоминание — адресат, а не часть вопроса (см. parse_request).
+        _w = task.split()
+        while _w and _w[0].startswith("@"):
+            _w.pop(0)
+        task = " ".join(_w)
         for prefix in ("ask ",):
             if task.lower().startswith(prefix):
                 task = task[len(prefix):].strip()
@@ -631,7 +644,11 @@ class Runtime:
         finally:
             sem.release()
         fact_text = facts.get("text") or "(нет данных)"
-        analysis = bool(env.get("args", {}).get("analysis")) or True
+        analysis = bool(env.get("args", {}).get("analysis"))
+        # FACT (2026-09-19): здесь было `... or True`, то есть analysis ВСЕГДА True.
+        # Из-за этого каждый `ask` эскалировал в hermes-reason, и назначенный агенту
+        # тир (hermes-local у monitoring/backup/server-guardian) по пути ask был
+        # недостижим — простые агенты никогда не ходили на локальные модели.
         model, why = models.model_for(agent.id, task, analysis=analysis)
         text, meta = await asyncio.to_thread(
             models.ask, task, fact_text, agent.id, agent.description, str(server_id()), model)
@@ -672,7 +689,7 @@ class Runtime:
             "fallback": meta.get("fallback") or (f"escalated from {meta['escalated_from']}"
                                                  if meta.get("escalated_from") else ""),
             "usage": meta.get("usage") or {},
-            "summary": (text or note[:120]).strip().splitlines()[0][:160],
+            "summary": (text or "")[:120].strip().splitlines()[0][:160] if text else "",
         })
         if not text:
             # Never fail the task: give the measurements and say plainly that the model is out.

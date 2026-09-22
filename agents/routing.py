@@ -136,7 +136,11 @@ def pick_handler(agent, handler: str) -> str:
         return handler
     if "status" in agent.handlers:
         return "status"
-    return agent.handlers[0] if agent.handlers else "identity"
+    # FACT (2026-09-19): agent.handlers — словарь {имя: [обработчики]}, поэтому
+    # handlers[0] давал KeyError: 0. Ломался каждый `ask` у агента без `status`
+    # (monitoring: health/alerts/targets), то есть именно у простых агентов.
+    names = list(agent.handlers)
+    return names[0] if names else "identity"
 
 
 # Guarded actions. Deliberately NOT a shell: a fixed verb over a named object, an allowlist
