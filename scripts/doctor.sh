@@ -13,6 +13,10 @@ CRIT=0; WARN=0
 ok(){   printf "[OK]   %-14s %s\n" "$1" "$2"; }
 warn(){ printf "[WARN] %-14s %s\n" "$1" "$2"; WARN=$((WARN+1)); }
 fail(){ printf "[FAIL] %-14s %s\n" "$1" "$2"; CRIT=$((CRIT+1)); }
+# Чужое — не наш вердикт, но и не секрет: печатаем и НЕ считаем. Иначе доктор вечно
+# стоит в DEGRADED из-за соседей, которых нам трогать нельзя, и предупреждение перестают
+# читать (политика 2026-09-17: чужие контейнеры не трогаем).
+info(){ printf "[INFO] %-14s %s\n" "$1" "$2"; }
 
 # --- agent-runtime defaults -------------------------------------------------
 # The agent OS runs as unix user `hermes` with its own venv and home. Without
@@ -196,9 +200,16 @@ fi
 
 # 11. Docker / systemd
 if command -v docker >/dev/null 2>&1; then
-  dead=$(docker ps -a --filter status=exited --format '{{.Names}}' 2>/dev/null | wc -l)
-  (( dead > 0 )) && warn "Docker" "$dead exited container(s): $(docker ps -a --filter status=exited --format '{{.Names}}' 2>/dev/null | tr '\n' ' ')" \
-                 || ok "Docker" "no exited containers"
+  # Свои контейнеры называются hermes-*. Признак «exited» у чужого контейнера не делает больным
+  # НАШ узел и не чинится нами; признак «exited» у нашего — делает (обычно это забытая заготовка).
+  own_dead=(); foreign_dead=()
+  while read -r cname; do
+    [[ -z "$cname" ]] && continue
+    if [[ "$cname" == hermes-* ]]; then own_dead+=("$cname"); else foreign_dead+=("$cname"); fi
+  done < <(docker ps -a --filter status=exited --format '{{.Names}}' 2>/dev/null)
+  (( ${#own_dead[@]} > 0 )) && warn "Docker" "${#own_dead[@]} exited container(s) of ours: ${own_dead[*]}" \
+                           || ok "Docker" "no exited containers of ours"
+  (( ${#foreign_dead[@]} > 0 )) && info "DockerForeign" "${#foreign_dead[@]} exited container(s) of other projects: ${foreign_dead[*]} (chuzhoe — reshenie vladeltsa)"
 else warn "Docker" "not installed"; fi
 failed=$(systemctl --no-pager --plain list-units --state=failed 2>/dev/null | grep -c '\.service')
 (( failed > 0 )) && warn "systemd" "$failed failed unit(s): $(systemctl --no-pager --plain list-units --state=failed 2>/dev/null | awk '/\.service/{print $1}' | tr '\n' ' ')" || ok "systemd" "no failed units"
@@ -332,7 +343,7 @@ print(", ".join(stale))
 PYEOF2
 )"
   [[ -z "$STALE" ]] && ok "PeerFreshness" "every known peer reported within 24h" \
-                    || warn "PeerFreshness" "silent for >24h: $STALE"
+                    || warn "PeerFreshness" "silent for >24h: $STALE (uzly nashey shiny; chuzhoy uzel — reshenie vladeltsa)"
 else
   warn "Federation" "no /var/lib/hermes-bus/nodes.json yet (bus never saw a message)"
 fi
