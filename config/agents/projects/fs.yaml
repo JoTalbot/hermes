@@ -89,7 +89,7 @@ bus:
         PROJECT_SLUG: "fs"
         PROJECT_PATH: "/opt/orchestrator/projects/fs"
         PROJECT_REPO: "https://github.com/JoTalbot/fs"
-        PROJECT_SERVICE: "fstrim.service jo-agent-fs.service nfs-common.service"
+        PROJECT_SERVICE: "fs-fed-port-node-f.service fs-fed-relay-node-e.service fs-fed-route-node-e.service"
     run:
       run: bash /opt/hermes/agents/checks/project-run.sh
       timeout: 180
@@ -97,7 +97,7 @@ bus:
         PROJECT_SLUG: "fs"
         PROJECT_PATH: "/opt/orchestrator/projects/fs"
         PROJECT_REPO: "https://github.com/JoTalbot/fs"
-        PROJECT_SERVICE: "fstrim.service jo-agent-fs.service nfs-common.service"
+        PROJECT_SERVICE: "fs-fed-port-node-f.service fs-fed-relay-node-e.service fs-fed-route-node-e.service"
     lookup:
       run: bash /opt/hermes/agents/checks/lookup.sh
       timeout: 180
