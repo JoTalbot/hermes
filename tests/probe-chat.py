@@ -81,6 +81,13 @@ print("mention-multi=%s" % R.Runtime.parse_request({"text": "@a @b status k=v"})
 print("mention-args=%s" % R.Runtime.parse_request({"text": "@a @b status k=v"})[1].get("k"))
 print("mention-empty=%s" % R.Runtime.parse_request({"text": "@a @b"})[0])
 print("plain-handler=%s" % R.Runtime.parse_request({"text": "status k=v"})[0])
+# Узел как часть адреса: «@node-arm-llm/monitoring health» — адресат это узел+агент,
+# обработчик по-прежнему берётся из текста (проверено живьём 2026-09-22: удалённый узел
+# ответил monitoring.health → OK 0.31s, а неизвестный ему обработчик — честным FAIL).
+print("mention-node-handler=%s" % R.Runtime.parse_request(
+    {"text": "@node-arm-llm/monitoring health"})[0])
+print("mention-node-only=%s" % R.Runtime.parse_request(
+    {"text": "@node-arm-llm/monitoring"})[0])
 print("plain-args=%s" % R.Runtime.parse_request({"text": "status k=v"})[1].get("k"))
 # Контракт конверта: явный обработчик приходит в args (env["handler"] читается вместе с
 # args-словарём). Явный обработчик обязан побеждать упоминание.
