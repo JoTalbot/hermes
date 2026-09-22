@@ -125,6 +125,10 @@ ck "the doctor names foreign containers separately" "DockerForeign" \
    "$(grep -o 'DockerForeign' scripts/doctor.sh | head -1)"
 ck "ownership is decided by the hermes- prefix" "hermes-*" \
    "$(grep -o 'hermes-\*' scripts/doctor.sh | head -1)"
+ck "the doctor names foreign failed units separately" "systemdForeign" \
+   "$(grep -o 'systemdForeign' scripts/doctor.sh | head -1)"
+ck "our failed units are hermes-* and the bus" "hermes-*|nats-server*" \
+   "$(grep -o 'hermes-\*|nats-server\*' scripts/doctor.sh | head -1)"
 INFOFN="$(grep -m1 '^info(){' scripts/doctor.sh || true)"
 ck "an informational line never counts as a warning" "0" \
    "$(WARN=0 bash -c "${INFOFN}; info x y >/dev/null; printf %s \"\$WARN\"")"
@@ -830,6 +834,21 @@ else
   ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++))
   echo "  ~ wave regressions skipped (нет venv шины)"
 fi
+
+echo "[20] bus registry: a silent node can be taken off the account"
+# Снятие с учёта — операция, а не правка файла руками: она отказана себе, идемпотентна,
+# атомарна и самовосстанавливающаяся (мост зарегистрирует узел заново, если тот заговорит).
+BUS_TMP="$(mktemp -d)"
+printf '%s' '{"arm-server-01":{"node":"arm-server-01","msgs":1,"last_seen":"2026-09-22T00:00:00+00:00"},"ghost":{"node":"ghost","msgs":9,"last_seen":"2026-09-19T15:14:33+00:00"}}' > "$BUS_TMP/nodes.json"
+FORGET="$(HERMES_BUS_STATE="$BUS_TMP" ./.venv-bus/bin/python bus/bus.py forget ghost 2>&1)"
+ck "a silent node can be taken off the register" "снят с учёта: ghost" "$FORGET"
+ck "the register no longer lists it" "0" "$(grep -c ghost "$BUS_TMP/nodes.json" || true)"
+ck "the file stays valid json" "ok" "$(./.venv-bus/bin/python -c "import json;json.load(open('$BUS_TMP/nodes.json'));print('ok')" 2>&1)"
+SELF="$(HERMES_BUS_STATE="$BUS_TMP" ./.venv-bus/bin/python bus/bus.py forget arm-server-01 2>&1)"
+ck "a node refuses to forget itself" "нельзя" "$SELF"
+MISS="$(HERMES_BUS_STATE="$BUS_TMP" ./.venv-bus/bin/python bus/bus.py forget never-was 2>&1)"
+ck "forgetting an unknown node is a no-op, not an error" "не зарегистрирован" "$MISS"
+rm -rf "$BUS_TMP"
 
 echo
 echo "════ $PASS passed · $FAIL failed · $SKIP skipped ════"
