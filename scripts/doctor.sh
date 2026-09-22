@@ -211,8 +211,21 @@ if command -v docker >/dev/null 2>&1; then
                            || ok "Docker" "no exited containers of ours"
   (( ${#foreign_dead[@]} > 0 )) && info "DockerForeign" "${#foreign_dead[@]} exited container(s) of other projects: ${foreign_dead[*]} (chuzhoe — reshenie vladeltsa)"
 else warn "Docker" "not installed"; fi
-failed=$(systemctl --no-pager --plain list-units --state=failed 2>/dev/null | grep -c '\.service')
-(( failed > 0 )) && warn "systemd" "$failed failed unit(s): $(systemctl --no-pager --plain list-units --state=failed 2>/dev/null | awk '/\.service/{print $1}' | tr '\n' ' ')" || ok "systemd" "no failed units"
+# Упавшие юниты: свои — предупреждение, чужие — информация. Упавший юнит соседнего проекта
+# отсюда не чинится и НЕ делает больным наш стек; но он печатается целиком, потому что видеть
+# его надо (правило то же, что у Docker выше). Своими считаем hermes-* и шину nats-server:
+# без неё агенты немы.
+own_failed=(); foreign_failed=()
+while read -r unit; do
+  [[ -z "$unit" ]] && continue
+  case "$unit" in
+    hermes-*|nats-server*) own_failed+=("$unit") ;;
+    *)                     foreign_failed+=("$unit") ;;
+  esac
+done < <(systemctl --no-pager --plain list-units --state=failed 2>/dev/null | awk '/\.service/{print $1}')
+(( ${#own_failed[@]} > 0 )) && warn "systemd" "${#own_failed[@]} failed unit(s) of ours: ${own_failed[*]}" \
+                           || ok "systemd" "no failed units of ours"
+(( ${#foreign_failed[@]} > 0 )) && info "systemdForeign" "${#foreign_failed[@]} failed unit(s) of other projects: ${foreign_failed[*]} (chuzhoe — reshenie vladeltsa)"
 
 # 12. Tailscale (the plan's transport for Android control)
 if command -v tailscale >/dev/null 2>&1; then
