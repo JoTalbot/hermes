@@ -63,7 +63,9 @@ BOARD = "agents-chat"
 HERMES_HOME = os.environ.get("HERMES_HOME", "/home/hermes/.hermes")
 HERMES_BIN = os.environ.get("HERMES_BIN", "/home/hermes/.hermes-venv/bin/hermes")
 NATS_ENV = "/etc/hermes/nats.env"
-STATE_DIR = Path("/var/lib/hermes-bus")
+# Каталог состояния шины. Переопределяется переменной: операции над реестром узлов
+# (nodes.json) должны проверяться на временном каталоге, а не на живом.
+STATE_DIR = Path(os.environ.get("HERMES_BUS_STATE", "/var/lib/hermes-bus"))
 SUBJECT_PREFIX = "hermes"
 # Request/reply lives OUTSIDE the JetStream subject space on purpose. The server answers
 # any publish-with-reply-subject inside a stream with a JetStream PubAck
@@ -509,6 +511,39 @@ def cmd_nodes(a) -> int:
     return 0
 
 
+def cmd_forget(a) -> int:
+    """Снять узел с учёта шины: он молчит, но продолжает числиться пиром у доктора.
+
+    Регистрация самовосстанавливающаяся: мост пишет запись при любом сообщении с полем
+    `node`, поэтому «забытый» узел, который снова заговорит, вернётся сам. Себя забыть
+    нельзя — это скрыло бы работающий узел из его же списка.
+    """
+    d = STATE_DIR / "nodes.json"
+    if not d.exists():
+        print("узлов на шине ещё не было — забывать нечего")
+        return 1
+    try:
+        nodes = json.loads(d.read_text()) or {}
+    except Exception as e:                     # noqa: BLE001 — причина важнее трейсбека
+        print(f"nodes.json не читается ({type(e).__name__}: {e}) — не трогаю")
+        return 1
+    name = a.node
+    if name in (server_id(), node_name()):
+        print(f"«{name}» — это ЭТОТ узел ({server_id()}); забывать его нельзя")
+        return 1
+    entry = nodes.pop(name, None)
+    if entry is None:
+        print(f"«{name}» и так не зарегистрирован — ничего не меняю")
+        return 0
+    tmp = d.with_name(d.name + ".tmp")
+    tmp.write_text(json.dumps(nodes, indent=2))
+    tmp.replace(d)
+    print(f"снят с учёта: {name} (msgs={entry.get('msgs', '?')}, "
+          f"last_seen={entry.get('last_seen') or '?'})")
+    print("если узел снова заговорит на шине, он зарегистрируется сам")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="bus", description="Agent Bus CLI (NATS + local mirror)")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -547,6 +582,8 @@ def main() -> int:
 
     sub.add_parser("channels").set_defaults(f=cmd_channels)
     sub.add_parser("nodes").set_defaults(f=cmd_nodes)
+    p = sub.add_parser("forget", help="снять молчащий узел с учёта шины")
+    p.add_argument("node"); p.set_defaults(f=cmd_forget)
 
     a = ap.parse_args()
     return a.f(a)
