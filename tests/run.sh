@@ -89,6 +89,15 @@ uniqn=$(printf '%s\n' $nums | sort -nu | wc -l)
 ck "doctor gate numbers contiguous 1..N" "yes" "$( [[ "$maxn" == "$uniqn" ]] && echo yes || echo "gap: max=$maxn unique=$uniqn" )"
 ck "doctor covers the backup gate" "yes" "$( grep -qE '^# 13\. Backups' scripts/doctor.sh && echo yes || echo no )"
 ck "doctor verdict strings present" "SYSTEM HEALTH: HEALTHY" "$(grep -o 'SYSTEM HEALTH: HEALTHY' scripts/doctor.sh)"
+# Docker: свои exited-контейнеры — предупреждение, чужие — информация. Без этого доктор вечно
+# стоит в DEGRADED из-за соседей, которых нам трогать нельзя, и его перестают читать.
+ck "the doctor names foreign containers separately" "DockerForeign" \
+   "$(grep -o 'DockerForeign' scripts/doctor.sh | head -1)"
+ck "ownership is decided by the hermes- prefix" "hermes-*" \
+   "$(grep -o 'hermes-\*' scripts/doctor.sh | head -1)"
+INFOFN="$(grep -m1 '^info(){' scripts/doctor.sh || true)"
+ck "an informational line never counts as a warning" "0" \
+   "$(WARN=0 bash -c "${INFOFN}; info x y >/dev/null; printf %s \"\$WARN\"")"
 ck "secret scan clean on repo" "clean" "$(bash scripts/secret-scan.sh --worktree)"
 echo "[8] agent bus + agent wiring (static)"
 ck "bus.py compiles" "ok" "$(python3 -m py_compile bus/bus.py && echo ok || echo fail)"
