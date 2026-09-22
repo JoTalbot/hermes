@@ -35,10 +35,40 @@ for f in glob.glob('config/**/*.yaml', recursive=True):
             if d.get('status')=='active' and not str(d['profile'].get('workdir','')).startswith('/'):
                 bad.append(f"{f}: workdir not absolute")
     except Exception as e: bad.append(f"{f}: {e}")
+
+# Реестр проектов должен быть ПРИГОДЕН К ДЕЙСТВИЮ, а не только валиден: действие
+# clone-project достаёт repo и local_path именно из этих файлов и откажет, если
+# репозиторий не под разрешённым владельцем или путь не в разрешённых корнях.
+# Молчаливый отказ в ответ на «склонируй проект X» — это ложь о готовности системы,
+# поэтому расхождение должно валить гейт, а не выясняться в разговоре.
+OWNER_ALLOW = "https://github.com/JoTalbot/"
+CHAT_RESTORE_ROOTS = ("/opt/", "/home/ubuntu/")
+# Пути в защищённых/системных каталогах: клонирование из чата им недоступно ОСОЗНАННО.
+# Появится новый — его надо внести сюда руками, а не получить отказ в чате.
+ROOT_EXCEPTIONS = {"logistics-root-logistics": "/root/logistics",
+                   "repo": "/root/agents/-Octopus/repo"}
+for f in sorted(glob.glob('config/agents/projects/*.yaml')):
+    if 'README' in f:
+        continue
+    slug = f.split('/')[-1][:-5]
+    d = yaml.safe_load(open(f)) or {}
+    tech = d.get('technology') or {}
+    repo = str(tech.get('repo') or '')
+    dest = str(tech.get('local_path') or '')
+    if not repo or not dest:
+        bad.append(f"{f}: нет repo/local_path — clone-project не сможет восстановить проект")
+        continue
+    if not repo.startswith(OWNER_ALLOW):
+        bad.append(f"{f}: repo вне {OWNER_ALLOW} — действие откажет; расширять allowlist осознанно")
+    if not dest.startswith('/'):
+        bad.append(f"{f}: local_path не абсолютный: {dest}")
+    elif not dest.startswith(CHAT_RESTORE_ROOTS) and ROOT_EXCEPTIONS.get(slug) != dest:
+        bad.append(f"{f}: {dest} вне /opt|/home/ubuntu и не в списке исключений")
 print("\n".join(bad) or "OK")
 PY
 )
 ck "yaml configs valid" "OK" "$out"
+ck "the project registry is actionable (clone-project can resolve every project)" "OK" "$out"
 
 echo "[3] shim: auth, upstream failure, happy path, models, metrics"
 python3 tests/fake_aios.py & FAKE=$!
