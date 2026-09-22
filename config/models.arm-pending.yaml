@@ -1,0 +1,44 @@
+# models.arm-pending.yaml — СЦЕНАРИЙ, НЕ АКТИВЕН. Активная политика — config/models.yaml.
+#
+# Что предлагает: простые агенты (server-guardian, monitoring, backup) и default уходят на
+# локальную модель (ollama на этом же узле, тир hermes-local). Это бесплатно, но слабее и
+# медленнее: замер 2026-09-19, записанный в комментарии agents/models.py — промпт 5707
+# токенов на qwen2.5:3b / 4 ядра ARM дал 173,6 с в первый проход и 0,5 с по кэшу промпта.
+# Для тира local факты поэтому режутся до 900 знаков (models.py, fact_limit) — иначе запрос
+# уходит в таймаут провайдера, и агент отвечает дороже, а не дешевле.
+#
+# Почему не включено: сценарий рассчитан на работающий сервер 2 (130.61.16.167 /
+# model.autosklo.org.ua) с заполненным MODEL_API_URL. На 2026-09-22 сервер 2 недостижим
+# (порты 443 и 80 закрыты), а включение раньше времени делает простых агентов медленнее.
+# Решение о включении — за владельцем; разбор и доказательства:
+# docs/MILESTONE-2026-09-22-wave-20260919.md
+#
+# Применение (полностью обратимо):
+#   sudo cp /opt/hermes/config/models.yaml /opt/hermes/config/models.yaml.canon.bak
+#   sudo cp /opt/hermes/config/models.arm-pending.yaml /opt/hermes/config/models.yaml
+#   sudo bash /opt/hermes/scripts/install-model-policy.sh --check    # ждём MODEL-POLICY: OK
+#   sudo systemctl restart hermes-agents
+# Откат:
+#   sudo cp /opt/hermes/config/models.yaml.canon.bak /opt/hermes/config/models.yaml
+#   sudo systemctl restart hermes-agents
+#
+# ВАЖНО: файл обязан оставаться валидным для install-model-policy.sh — разделы
+# `default`, `agents` и `escalate` присутствуют (иначе включение сломает гейт, а агенты
+# молча уедут на встроенные умолчания).
+agents:
+  orchestrator: hermes-reason      # без изменений: маршрутизация и риск
+  security: hermes-reason          # без изменений: оценка риска
+  github: hermes-code              # без изменений: диффы и ревью
+  server-guardian: hermes-local    # было hermes-fast
+  monitoring: hermes-local         # было hermes-fast
+  backup: hermes-local             # было hermes-fast
+  # проектные агенты наследуют default — по этому сценарию он тоже локальный
+default: hermes-local
+local: hermes-local
+escalate:
+  analysis: hermes-reason          # «почему», «проанализируй», «рекомендации», «план», «риск»
+  code: hermes-code                # diff, review, refactor, tests
+  long: hermes-long                # сводки по журналам, логам, множеству файлов
+limits:
+  max_tokens: 700                  # тот же потолок ответа, что в каноне
+  timeout_s: 45

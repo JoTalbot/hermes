@@ -15,6 +15,10 @@
 # Deterministic handlers (status, top, disk, alerts, audit…) do NOT use a model at all — a
 # load average is not a matter of opinion. Models are used only for `ask`: explaining facts,
 # planning, judging risk, reading code.
+# Сценарий «локально-первая политика» (простые агенты → ollama) лежит отдельным файлом
+# config/models.arm-pending.yaml и НЕ активен: его собственный заголовок объясняет, почему
+# включать его раньше времени дороже, а не дешевле. Решение владельца — в
+# docs/MILESTONE-2026-09-22-wave-20260919.md.
 default: hermes-fast
 local: hermes-local          # degradation path when the balancer is unreachable
 
