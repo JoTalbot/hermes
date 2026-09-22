@@ -1,6 +1,7 @@
 [Unit]
 Description=Hermes agents runtime (bus-attached agents: orchestrator, guardian, github, security, monitoring, backup, projects)
-Documentation=file:/opt/hermes/docs/RUNBOOK.md /opt/hermes/agents/runtime.py
+Documentation=file:///opt/hermes/docs/RUNBOOK.md
+Documentation=file:///opt/hermes/agents/runtime.py
 After=network-online.target nats-server.service hermes-bus-bridge.service
 Wants=network-online.target nats-server.service
 StartLimitIntervalSec=0
