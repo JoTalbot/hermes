@@ -10,11 +10,11 @@
 | Area | State |
 |---|---|
 | Audit of `arm-server-01` | ✅ done (2026-09-15) |
-| Hermes runtime | ✅ already installed at `/home/ubuntu/hermes-venv` (legacy config → liza mock) |
-| LLM Balancer | ✅ `octopus-aios-bridge` on `127.0.0.1:9600`, 11 providers |
-| Hermes → Balancer rewiring | ⛔ blocked: **disk at 98%** (3.8 GB free) — see `docs/INCIDENTS.md` |
-| Tailscale | ⛔ not installed on server; needs user auth key |
-| GitHub sync | ✅ this repo |
+| Hermes runtime | ✅ product runtime (Hermes Agent v0.19.0) at `/home/hermes/.hermes-venv`, 8 systemd units active |
+| LLM Balancer | ✅ `octopus-aios-bridge` on `127.0.0.1:9600` (11 providers); the shim on `:9700` exposes 6 tier aliases |
+| Hermes → Balancer rewiring | ✅ done (2026-09-17). The 98 %-disk blocker is gone: 52 % used, 71 GB free (2026-09-22) |
+| Tailscale | ✅ installed and up (node `100.109.170.74`, 2026-09-22) |
+| GitHub sync | ✅ this repo · wave of 2026-09-19 recorded on 2026-09-22 — see `docs/MILESTONE-2026-09-22-wave-20260919.md` |
 
 ## What already exists on the server (do not rebuild this)
 
@@ -42,7 +42,9 @@ madworld-api         :8090   behind nginx TLS on api.autosklo.org.ua
 ```
 hermes/
 ├── README.md                 you are here
-├── docs/                     ARCHITECTURE, BALANCER, SECURITY, RUNBOOK, DISASTER_RECOVERY, INCIDENTS
+├── docs/                     ARCHITECTURE, BALANCER, SECURITY, RUNBOOK, DISASTER_RECOVERY,
+│                             MULTI_SERVER, OBSERVABILITY, MEMORY, AGENT_MODEL, SKILLS,
+│                             SKILLS-TODO, AGENT-IMPROVEMENTS, FINAL-REPORT-*, MILESTONE-*
 ├── config/                   agents/, models/, policies/, servers/  (source of truth, no secrets)
 ├── skills/                   skill source + REGISTRY.md
 ├── memory/                   decisions/, architecture/, lessons/ (FACT/OBSERVATION/HYPOTHESIS tagged)
@@ -55,7 +57,8 @@ hermes/
 ## Golden rules
 
 1. **No secrets in git, ever.** `.env` files stay on the server with `0600`; only `.env.example` is committed.
-   A pre-commit secret scan runs in `scripts/` and in CI.
+   `scripts/secret-scan.sh` refuses to let a token in, and the contract suite runs it over the worktree
+   (there is no CI runner in this repo — the suite *is* the gate).
 2. **Idempotency.** `bootstrap.sh` must be safe to run on a healthy server and on a naked one.
 3. **GitHub is source of truth for config, not for data.** Databases and runtime state need their own backup target.
 4. **Selective context.** An agent gets global + own + project context, never the whole box.
