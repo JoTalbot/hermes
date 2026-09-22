@@ -382,7 +382,7 @@ Agents never hold provider keys: they name a **tier**, the LLM Balancer picks th
 | `hermes-reason` | groq-gpt-oss-120b | analysis, planning, risk (orchestrator, security, «почему…») |
 | `hermes-code` | mistral-small, hf-Qwen2.5-72B | diffs, review, refactors (github) |
 | `hermes-long` | gemini-2.5-flash | summaries over journals and many files |
-| `hermes-local` | ollama qwen2.5:1.5b / llama3.2:3b (on this box) | degradation when the balancer is down |
+| `hermes-local` | server 2 over wg0: qwen2.5:3b, qwen2.5-coder:7b; this box's ollama qwen2.5:3b = backup | non-egress and bulk work, degradation when the balancer or the cloud is down |
 
 Escalation is a decision, not a default: every use is logged with the model alias and the
 reason (`journalctl -u hermes-agents | grep ask:`), so cost drift is visible. When the

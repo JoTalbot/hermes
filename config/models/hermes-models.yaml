@@ -28,7 +28,7 @@ models:
   hermes-long:   # gemini-2.5-flash, liza-rpa-gemini-web
     tier: long_context
     use_for: [repo-wide-audit, memory-retrieval, log-triage]
-  hermes-local:  # ollama qwen2.5:1.5b / llama3.2:3b — free, offline, weak
+  hermes-local:  # server 2 over wg0: qwen2.5:3b, qwen2.5-coder:7b; this box's ollama qwen2.5:3b = backup
     tier: local
     use_for: [heartbeat-pings, cheap-retries, last-resort-fallback]
 

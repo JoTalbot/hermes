@@ -3,7 +3,7 @@
 Routes and validation errors were copied from live responses on 2026-09-15:
   POST /api/v1/aios/ask      {"goal": str, "tier"?: str}   → 422 if goal missing
   POST /api/v1/aios/execute  {"goal": str}                 → 422 if goal missing
-  GET  /health                                            → the 11-provider payload
+  GET  /health                                            → the 13-provider payload
 Anything else 404s, exactly like the real service.
 """
 import json
@@ -14,7 +14,8 @@ PROVIDERS = [
     ("groq-qwen3.8-27b","fast",2,13),("groq-gpt-oss-120b","reasoning",3,13),
     ("mistral-small","code",7,1),("gemini-gemini-2.5-flash","long_context",10,2),
     ("hf-Qwen2.5-72B-Instruct","code",15,1),("liza-rpa-gemini-web","long_context",18,0),
-    ("ollama-qwen2.5:1.5b","local",20,0),("ollama-llama3.2:3b","local",25,0),
+    ("arm-qwen2.5-3b","local",5,0),("arm-qwen2.5-coder-7b","local",6,0),
+    ("ollama-qwen2.5:3b","local",20,0),("arena-claude-sonnet-4-5-20250929","arena",1,0),
     ("autonomous_heuristic_engine","local",999,0),
 ]
 

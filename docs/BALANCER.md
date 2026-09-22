@@ -18,7 +18,7 @@ octopus-aios.service
 ```json
 {"ok":true,"service":"octopus-aios-bridge","version":"1.1.0",
  "aios_kernel_state":"running",
- "llm_balancer":{"total_providers":11,"cache_size":0,
+ "llm_balancer":{"total_providers":13,"cache_size":0,
    "providers":[{"name":"cerebras-llama3.3-70b","tier":"fast","healthy":true,"weight":2,
                   "calls":162,"avg_latency_ms":0.0,"keys_count":3}, ...]}}
 ```
@@ -35,9 +35,19 @@ Providers seen, with tier and key count (counts only — never key material):
 | gemini-gemini-2.5-flash | long_context | 10 | 2 |
 | hf-Qwen2.5-72B-Instruct | code | 15 | 1 |
 | liza-rpa-gemini-web | long_context | 18 | 0 |
-| ollama-qwen2.5:1.5b | local | 20 | 0 |
-| ollama-llama3.2:3b | local | 25 | 0 |
+| arm-qwen2.5-3b | local | 5 | 0 |
+| arm-qwen2.5-coder-7b | local | 6 | 0 |
+| ollama-qwen2.5:3b | local | 20 | 0 |
+| arena-claude-sonnet-4-5 | arena | 1 | 0 |
 | autonomous_heuristic_engine | local | 999 | 0 |
+
+Correction (2026-09-22): `ollama-qwen2.5:1.5b` (w20) and `ollama-llama3.2:3b` (w25) were listed
+here while this host's ollama has exactly one model, `qwen2.5:3b` — and they still reported
+`healthy: true`, because `BaseLLMProvider.is_available()` trusts its own memory and never asks
+the node. A local fallback therefore burned a full provider timeout and only then reached the
+boilerplate engine. Both phantom entries are gone; `OllamaLocalProvider.is_available()` now
+probes `GET /api/tags` (60 s cache), and the local tier's first choice is the second server
+over wg0 (`arm-qwen2.5-3b` w5 → `arm-qwen2.5-coder-7b` w6 → this host's ollama w20).
 
 ## The correction that matters
 

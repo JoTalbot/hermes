@@ -84,7 +84,8 @@ comment stream more reliably than they infer relationships from parent links.
 2. **Routine model work stays on the free fast tier** (Groq/Cerebras free keys).
 3. **Escalate only for shape of task:** analysis → `hermes-reason`, code → `hermes-code`,
    long context → `hermes-long`. The escalation is logged with its reason.
-4. **Degrade, never fail:** balancer down → local Ollama → facts alone.
+4. **Degrade, never fail:** balancer down → local tier (server 2 over wg0, then this host's
+   ollama) → facts alone.
 5. **No provider keys in agents.** The policy names tiers; only the balancer holds keys.
 
 Measured evidence (2026-09-17): `ask` on the host question answered in ~1.1-1.4 s via

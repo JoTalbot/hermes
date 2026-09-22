@@ -3,13 +3,15 @@
 
 The owner's requirement, in one line: *prefer free/cheap models, but do not lose smartness
 where smartness is the point.* The LLM Balancer already exposes tier aliases that map onto
-its 11 provider keys (Groq / Cerebras / Gemini Flash / Mistral / local Ollama):
+its 13 registered providers (Groq / Cerebras / Gemini Flash / Mistral / HuggingFace, plus the
+second server's ollama over wg0 and this host's ollama as its backup):
 
     hermes-fast   → fast tier        (groq-gpt-oss-20b, groq-qwen3.8-27b, cerebras-llama3.3-70b)
     hermes-reason → reasoning tier   (groq-gpt-oss-120b)
     hermes-code   → code tier        (mistral-small, hf-Qwen2.5-72B-Instruct)
     hermes-long   → long_context     (gemini-2.5-flash)
-    hermes-local  → local tier       (ollama qwen2.5:1.5b / llama3.2:3b — free, on this box)
+    hermes-local  → local tier       (server 2 over wg0: arm-qwen2.5-3b, arm-qwen2.5-coder-7b;
+                                      this host's ollama qwen2.5:3b = backup, weight 20)
     hermes-auto   → balancer decides by weight and health
 
 So an agent does not pick a provider or hold a key: it picks a TIER, and the balancer does

@@ -2,14 +2,15 @@
 #
 # The rule from the owner: prefer free/cheap models, but do not lose smartness where the
 # smart model is the point. Agents never hold provider keys — they name a TIER, and the LLM
-# Balancer (11 providers, behind the shim on 127.0.0.1:9700) picks the actual provider.
+# Balancer (13 providers, behind the shim on 127.0.0.1:9700) picks the actual provider.
 #
 # Tier → providers behind it (measured 2026-09-17, all free or cheap):
 #   hermes-fast   fast        groq-gpt-oss-20b, groq-qwen3.8-27b, cerebras-llama3.3-70b
 #   hermes-reason reasoning   groq-gpt-oss-120b
 #   hermes-code   code        mistral-small, hf-Qwen2.5-72B-Instruct
 #   hermes-long   long_context gemini-2.5-flash
-#   hermes-local  local       ollama-qwen2.5:1.5b, ollama-llama3.2:3b  (free, on this box)
+#   hermes-local  local       arm-qwen2.5-3b, arm-qwen2.5-coder-7b (server 2 over wg0),
+#                            ollama-qwen2.5:3b (this box, backup)  — non-egress/bulk work
 #   hermes-auto   —           balancer decides by weight and health
 #
 # Deterministic handlers (status, top, disk, alerts, audit…) do NOT use a model at all — a
