@@ -30,6 +30,14 @@ attribution = delta of the balancer's own `total_calls` counters):
 | «Назови одним предложением, зачем нужен health-check сервиса.» | `hermes-local` | **arm-qwen2.5-3b** (server 2, wg0) | 4.04 s | correct, coherent, 197 chars |
 | the same prompt | `hermes-fast` | groq-gpt-oss-20b | 0.63 s | correct, 156 chars |
 
+MEASURED (bulk shape — what the local tier is actually good for). Same shim, a 622-character
+prompt asking for five observations plus one warning over a list of facts:
+`hermes-local` answered in 15.6 s with 345 characters, correct ordering and no refusal. Quality
+caveat, recorded honestly: the numbers it repeated from the prompt were right (2.1 GB free,
+78% disk, five exited containers, backup four hours old), but it turned "load average 1.9" into
+"1.9 GHz" — extraction works, interpretation of units does not. That is the same lesson as
+decision 0002: facts come from deterministic handlers, the model only words them.
+
 MEASURED (degradation — cloud dead). In a throwaway process with all ten cloud providers forced
 to raise, `ask(auto)` returned `status=success`, `provider=ollama-qwen2.5:3b` (this host), in
 6.9 s with a real answer: a cloud outage now lands on a local model, not on the boilerplate
