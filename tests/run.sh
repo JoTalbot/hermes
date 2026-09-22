@@ -160,6 +160,15 @@ ck "free text is routed (not handed to the alphabetically first agent)" "route-h
 ck "a named project goes to the base project, not a worktree variant" "route-project=project:logistics" "$CHAT_PROBE"
 ck "a Russian alias for a project is understood" "route-alias=project:logistics" "$CHAT_PROBE"
 ck "an unparsable task is refused, not routed at random" "route-unknown=(none)" "$CHAT_PROBE"
+ck "an addressed mention is not mistaken for a handler" "mention-handler=ask" "$CHAT_PROBE"
+ck "a mention followed by a known handler still routes" "mention-handler-2=status" "$CHAT_PROBE"
+ck "several leading mentions are all addresses, not commands" "mention-multi=status" "$CHAT_PROBE"
+ck "arguments survive the mention" "mention-args=v" "$CHAT_PROBE"
+ck "a message of mentions alone falls back to identity" "mention-empty=identity" "$CHAT_PROBE"
+ck "plain text keeps its handler" "plain-handler=status" "$CHAT_PROBE"
+ck "plain text keeps its arguments" "plain-args=v" "$CHAT_PROBE"
+ck "an explicit handler still wins over the mention" "explicit-handler=disk" "$CHAT_PROBE"
+ck "an explicit handler in the envelope also wins" "envelope-handler=disk" "$CHAT_PROBE"
 ck "owner text is HTML-escaped for Telegram" "escape=&lt;b&gt;x&lt;/b&gt; &amp; y" "$CHAT_PROBE"
 ck "forwarded messages carry a readable kind header" "header-has-kind=True" "$CHAT_PROBE"
 ck "multi-line agent output is shown as a monospace block" "body-mono=True" "$CHAT_PROBE"
@@ -723,6 +732,63 @@ else
   ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); echo "  ~ live model telemetry checks skipped (нет venv шины)"
 fi
 
+
+echo "[19] regressions of the 2026-09-19 wave: addressing, tier reachability, honest tiers"
+if [[ -x ./.venv-bus/bin/python ]]; then
+  WAVE="$(./.venv-bus/bin/python - <<'PY' 2>&1
+import sys
+sys.path.insert(0, "agents")
+import routing
+
+
+class _Agent:
+    """Ровно та форма, что в реестре: handlers — это СЛОВАРЬ {имя: [обработчики]}."""
+    id = "monitoring"
+    capabilities = {"observability"}
+    handlers = {"health": ["health"], "alerts": ["alerts"], "targets": ["targets"]}
+
+
+marks = []
+try:                                     # было handlers[0] → KeyError: 0 на каждом ask
+    marks.append("dict-ok" if routing.pick_handler(_Agent(), "ask") == "health" else "dict-WRONG")
+except Exception as e:
+    marks.append("dict-RAISED-%s" % type(e).__name__)
+try:                                     # известный обработчик обязан выбираться по имени
+    marks.append("named-ok" if routing.pick_handler(_Agent(), "targets") == "targets" else "named-WRONG")
+except Exception as e:
+    marks.append("named-RAISED-%s" % type(e).__name__)
+
+src = open("agents/runtime.py").read()
+marks.append("mention-stripped" if 'while words and words[0].startswith("@")' in src
+             else "mention-NOT-STRIPPED")
+marks.append("analysis-not-forced"
+             if 'analysis = bool(env.get("args", {}).get("analysis"))' in src
+             else "analysis-FORCED")
+
+shim = open("deploy/shim/aios_openai_shim.py").read()
+marks.append("tiers-honest"
+             if 'VALID_TIERS = {"fast", "code", "reasoning", "long_context", "local"}' in shim
+             else "tier-list-drifted")
+
+import pathlib
+p = pathlib.Path("config/models.arm-pending.yaml")
+if p.exists():
+    marks.append("inactive-says-so" if "НЕ АКТИВЕН" in p.read_text() else "inactive-hides-it")
+else:
+    marks.append("inactive-absent")
+print(" ".join(marks))
+PY
+)"
+  ck "a dict of handlers is not indexed like a list" "dict-ok" "$WAVE"
+  ck "a known handler is still selected by name" "named-ok" "$WAVE"
+  ck "the mention is stripped before the handler is chosen" "mention-stripped" "$WAVE"
+  ck "analysis is a request, not a constant" "analysis-not-forced" "$WAVE"
+  ck "no tier is advertised that the balancer cannot serve" "tiers-honest" "$WAVE"
+  ck "an inactive policy scenario says it is inactive" "inactive-says-so" "$WAVE"
+else
+  ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++)); ((SKIP++))
+  echo "  ~ wave regressions skipped (нет venv шины)"
+fi
 
 echo
 echo "════ $PASS passed · $FAIL failed · $SKIP skipped ════"

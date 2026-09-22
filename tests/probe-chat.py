@@ -67,6 +67,27 @@ print("route-host=%s" % cap_for("проверить загрузку серве�
 print("route-project=%s" % cap_for("статус проекта logistics"))
 print("route-alias=%s" % cap_for("логистика статус"))
 print("route-unknown=%s" % cap_for("приготовить кофе"))
+
+# ── адресация упоминанием (регресс волны 2026-09-19) ───────────────────────────
+# В общем канале сообщение адресовано УПОМИНАНИЕМ («@node-arm-llm/server-guardian ask …»),
+# а обработчик брался из первого слова — то есть из самого упоминания. Такого обработчика
+# не существует, и агент молча не отвечал: разговор агентов в общем чате не работал.
+# Упоминание — адресат, а не команда; аргументы k=v при этом обязаны уцелеть.
+print("mention-handler=%s" % R.Runtime.parse_request(
+    {"text": "@node-arm-llm/server-guardian ask почему память растёт"})[0])
+print("mention-handler-2=%s" % R.Runtime.parse_request(
+    {"text": "@node-arm-llm/monitoring status"})[0])
+print("mention-multi=%s" % R.Runtime.parse_request({"text": "@a @b status k=v"})[0])
+print("mention-args=%s" % R.Runtime.parse_request({"text": "@a @b status k=v"})[1].get("k"))
+print("mention-empty=%s" % R.Runtime.parse_request({"text": "@a @b"})[0])
+print("plain-handler=%s" % R.Runtime.parse_request({"text": "status k=v"})[0])
+print("plain-args=%s" % R.Runtime.parse_request({"text": "status k=v"})[1].get("k"))
+# Контракт конверта: явный обработчик приходит в args (env["handler"] читается вместе с
+# args-словарём). Явный обработчик обязан побеждать упоминание.
+print("explicit-handler=%s" % R.Runtime.parse_request(
+    {"text": "@a ask x", "args": {"handler": "disk"}})[0])
+print("envelope-handler=%s" % R.Runtime.parse_request(
+    {"text": "@a ask x", "args": {}, "handler": "disk"})[0])
 print("handler-top=%s" % handler_for("Что грузит сервер?"))
 print("handler-disk=%s" % handler_for("сколько места на диске"))
 print("handler-alerts=%s" % handler_for("покажи алерты"))
