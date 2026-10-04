@@ -1,0 +1,20 @@
+# OCI execution policy. NEVER put private keys, tokens or passwords here.
+# Runtime copy: /etc/hermes/oci/execution-policy.yaml (mode 0600).
+version: 1
+execution:
+  enabled: false
+  allow_paid: false
+  require_approval: true
+  approval_ttl_seconds: 900
+  max_actions_per_run: 1
+  allowed_actions:
+    - create_instance
+  allowed_shapes:
+    - VM.Standard.A1.Flex
+    - VM.Standard.E2.1.Micro
+  max_total_ocpus: 4
+  max_total_memory_gib: 24
+  max_instances: 4
+  audit_log: /var/lib/hermes-agents/oci-execution.jsonl
+  approval_dir: /var/lib/hermes-agents/oci-approvals
+  placement_profiles: []
