@@ -10,6 +10,7 @@ python3 - "$CONFIG" "$POLICY" "$OCI" <<'PY'
 import hashlib, json, os, subprocess, sys, time
 import yaml
 cfg = yaml.safe_load(open(sys.argv[1])) or {}
+oci = sys.argv[3]
 pol = yaml.safe_load(open(sys.argv[2])) or {}
 ex = pol.get("execution") or {}
 args = json.loads(os.environ.get("ARGS_JSON","{}"))
