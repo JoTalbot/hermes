@@ -40,8 +40,14 @@ if action != "create_instance":
     print("BLOCK only create_instance is implemented in v1.1"); audit_row("blocked",False,"unsupported-action"); sys.exit(0)
 if not account or not profile_name or not plan_hash:
     print("BLOCK account, placement_profile and plan_hash are required"); audit_row("blocked",False,"missing-args"); sys.exit(0)
+accounts={a.get("name"):a for a in cfg.get("accounts",[]) if a.get("name")}
+a=accounts.get(account)
+profiles={x.get("name"):x for x in ex.get("placement_profiles",[]) if isinstance(x,dict) and x.get("name")}
+p=profiles.get(profile_name)
+if not a or not p:
+    print("BLOCK unknown account or placement profile"); audit_row("blocked",False,"unknown-target"); sys.exit(0)
 canonical=json.dumps({"account":account,"placement_profile":profile_name,
-                      "allowed_actions":sorted(allowed)},sort_keys=True,separators=(",",":"))
+                      "profile":p,"allowed_actions":sorted(allowed)},sort_keys=True,separators=(",",":"))
 expected="sha256:"+hashlib.sha256(canonical.encode()).hexdigest()
 if plan_hash != expected:
     print("BLOCK plan hash mismatch"); audit_row("blocked",False,"plan-hash"); sys.exit(0)
@@ -54,12 +60,6 @@ if ex.get("require_approval",True):
             print("BLOCK approval expired"); audit_row("blocked",False,"approval-expired"); sys.exit(0)
     except FileNotFoundError:
         print("BLOCK explicit approval is required"); audit_row("blocked",False,"approval-missing"); sys.exit(0)
-accounts={a.get("name"):a for a in cfg.get("accounts",[]) if a.get("name")}
-a=accounts.get(account)
-profiles={x.get("name"):x for x in ex.get("placement_profiles",[]) if isinstance(x,dict) and x.get("name")}
-p=profiles.get(profile_name)
-if not a or not p:
-    print("BLOCK unknown account or placement profile"); audit_row("blocked",False,"unknown-target"); sys.exit(0)
 if a.get("allow_paid",False) or (a.get("free_tier") or {}).get("allow_paid",False):
     print("BLOCK target account allows paid resources; execution refuses it"); audit_row("blocked",False,"account-paid"); sys.exit(0)
 home_region=a.get("home_region")
