@@ -11,6 +11,8 @@ done
 grep -q 'enabled: false' "$ROOT/config/oci/execution-policy.example.yaml" && ok "execution disabled by default" || bad "execution default is not disabled"
 grep -q 'allow_paid: false' "$ROOT/config/oci/execution-policy.example.yaml" && ok "paid execution disabled" || bad "paid execution default missing"
 grep -q 'require_approval: true' "$ROOT/config/oci/execution-policy.example.yaml" && ok "approval required" || bad "approval gate missing"
+grep -q 'max_total_ocpus: 2' "$ROOT/config/oci/execution-policy.example.yaml" && ok "A1 OCPU ceiling is 2" || bad "unsafe OCPU ceiling"
+grep -q 'max_total_memory_gib: 12' "$ROOT/config/oci/execution-policy.example.yaml" && ok "A1 memory ceiling is 12 GiB" || bad "unsafe memory ceiling"
 if grep -nE 'oci .* (delete|update)|--force|iam .*create|network .*create' "$ROOT/agents/checks/oci-"*.sh >/dev/null 2>&1; then
   bad "OCI handlers contain forbidden delete/update/force/IAM/network mutation patterns"
 else
