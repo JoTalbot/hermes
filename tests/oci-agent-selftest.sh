@@ -17,8 +17,8 @@ else
   ok "OCI config contains no credentials"
 fi
 if grep -RInE '(^|[[:space:]])(oci (compute|iam|network|identity).*(create|delete|update)|--force)' "$ROOT/agents/checks/oci-"*.sh >/dev/null 2>&1; then
-  bad "OCI handlers contain mutation commands"
+  bad "OCI handlers contain forbidden mutation commands"
 else
-  ok "OCI handlers are observe/plan only"
+  ok "OCI handlers contain no forbidden delete/update/force/IAM/network mutations"
 fi
 exit "$fail"
