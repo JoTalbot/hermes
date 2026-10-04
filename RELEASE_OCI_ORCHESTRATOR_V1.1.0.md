@@ -11,6 +11,7 @@
 - OCI instance launch executor for `create_instance`.
 - Append-only JSONL audit trail for blocked and attempted executions.
 - Execution self-test integrated into `tests/run.sh`.
+- Fake-OCI integration test covers plan → approval → apply → audit and invalid-plan rejection without cloud mutation.
 - Agent policy and bus wiring for execution-plan/apply handlers.
 
 ## Safety boundary
