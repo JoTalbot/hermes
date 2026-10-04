@@ -34,7 +34,7 @@ for account in cfg.get("accounts", []):
         continue
 
     rows = []
-    for region in sorted(set(account.get("regions") or [home])):
+    for region in [home]:
         for comp in compartments:
             r = subprocess.run(
                 [sys.argv[3], "compute", "instance", "list", "-c", comp,
