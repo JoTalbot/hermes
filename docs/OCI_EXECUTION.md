@@ -48,3 +48,9 @@ An account may reference profiles through execution_profiles.
 Any missing policy, unavailable inventory, policy violation, missing or expired approval, unknown target, or insufficient headroom returns BLOCK and does not launch anything.
 
 A failed OCI launch is recorded as an attempted mutation and returns FAIL. The executor does not retry automatically.
+
+## Capacity allocation
+
+v1.1 also exposes a read-only `capacity-plan` handler. It inventories only each account's home region, evaluates the configured execution profiles against the effective shape limits, and ranks candidates by remaining capacity.
+
+The allocator does not create, delete, resize or move resources. A `CANDIDATE` is only a placement recommendation; normal execution-plan, approval, fresh-inventory and apply gates still apply.
