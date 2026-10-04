@@ -149,6 +149,16 @@ if [[ -d "$REPO_DIR/deploy/systemd/hermes-gateway.service.d" ]]; then
 fi
 systemctl daemon-reload
 systemctl enable hermes-shim.service hermes-serve.service >/dev/null 2>&1 || log "enable failed (non-fatal if units start manually)"
+# ---- 8. OCI read-only bootstrap validator ----
+# The validator is safe to ship on every node. It only runs automatically when an
+# operator has deliberately provisioned /etc/hermes/oci/accounts.yaml.
+if [[ -s /etc/hermes/oci/accounts.yaml && -x "$REPO_DIR/scripts/oci-bootstrap-check.sh" ]]; then
+  log "OCI account registry detected — running read-only bootstrap validation"
+  bash "$REPO_DIR/scripts/oci-bootstrap-check.sh" || log "OCI bootstrap validation blocked — execution remains disabled"
+else
+  log "OCI account registry not configured — skipping cloud validation"
+fi
+
 log "done. Next: scripts/install-agents.sh, then scripts/doctor.sh"
 
 # ---- config gaps that used to fail silently ----
