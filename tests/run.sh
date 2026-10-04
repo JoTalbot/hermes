@@ -643,7 +643,8 @@ ck "a failed tier goes to a smarter backup before degrading" "escalation_target"
    "$(grep -o 'escalation_target' agents/models.py | head -1)"
 ck "the answer says when a backup tier answered" "резерв" \
    "$(grep -o 'резерв {meta' agents/runtime.py | head -1)"
-ESC="$(./.venv-bus/bin/python - <<'PY' 2>/dev/null
+if [[ -x ./.venv-bus/bin/python ]]; then
+  ESC="$(./.venv-bus/bin/python - <<'PY' 2>/dev/null
 import sys
 sys.path.insert(0, "agents")
 import models
@@ -659,7 +660,11 @@ print("цепочки-резерва-ок" if ok and models.escalation_target("h
       else "цепочки-резерва-СЛОМАНЫ")
 PY
 )"
-ck "backup chains are acyclic and bounded" "цепочки-резерва-ок" "$ESC"
+  ck "backup chains are acyclic and bounded" "цепочки-резерва-ок" "$ESC"
+else
+  ((SKIP++))
+  echo "  ~ backup chain live check skipped (нет venv шины)"
+fi
 ck "the exporter measures the share of bad ratings" "hermes_feedback_down_share_24h" \
    "$(grep -o 'hermes_feedback_down_share_24h' scripts/hermes_metrics_exporter.py | head -1)"
 ck "a quality drop raises an alert" "HermesAnswerQualityDrop" \
