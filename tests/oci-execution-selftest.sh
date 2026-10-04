@@ -15,6 +15,9 @@ grep -q 'max_total_ocpus: 2' "$ROOT/config/oci/execution-policy.example.yaml" &&
 grep -q 'max_total_memory_gib: 12' "$ROOT/config/oci/execution-policy.example.yaml" && ok "A1 memory ceiling is 12 GiB" || bad "unsafe memory ceiling"
 grep -q 'shape_limits' "$ROOT/agents/checks/oci-free-tier.sh" && ok "per-shape Free Tier quotas supported" || bad "per-shape quota support missing"
 grep -q 'max_instances' "$ROOT/agents/checks/oci-free-tier.sh" && ok "per-shape instance ceilings supported" || bad "per-shape instance ceiling missing"
+grep -q 'shape_limits' "$ROOT/agents/checks/oci-apply.sh" && ok "apply enforces per-shape limits" || bad "apply per-shape enforcement missing"
+grep -q 'max_actions_per_run' "$ROOT/agents/checks/oci-apply.sh" && ok "apply enforces action-count ceiling" || bad "apply action-count ceiling missing"
+grep -q 'inventory-invalid' "$ROOT/agents/checks/oci-apply.sh" && ok "invalid inventory is fail-closed" || bad "invalid inventory is not fail-closed"
 if grep -nE 'oci .* (delete|update)|--force|iam .*create|network .*create' "$ROOT/agents/checks/oci-"*.sh >/dev/null 2>&1; then
   bad "OCI handlers contain forbidden delete/update/force/IAM/network mutation patterns"
 else
