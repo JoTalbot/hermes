@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-CONFIG=/etc/hermes/oci/accounts.yaml
-POLICY=/etc/hermes/oci/execution-policy.yaml
+CONFIG="${OCI_ACCOUNTS_CONFIG:-/etc/hermes/oci/accounts.yaml}"
+POLICY="${OCI_EXECUTION_POLICY:-/etc/hermes/oci/execution-policy.yaml}"
 [[ -f "$CONFIG" ]] || { echo "BLOCK OCI registry not configured: $CONFIG"; exit 0; }
 [[ -f "$POLICY" ]] || { echo "BLOCK execution policy not configured: $POLICY"; exit 0; }
 python3 - "$CONFIG" "$POLICY" <<'PY'
