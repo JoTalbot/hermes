@@ -36,6 +36,7 @@ for p in plans:
         print(f"BLOCK account={p['account']}: placement profile {p['placement_profile']} is not defined")
         continue
     canonical = json.dumps({"account":p["account"],"placement_profile":p["placement_profile"],
+                            "profile":profiles[p["placement_profile"]],
                             "allowed_actions":sorted(allowed)}, sort_keys=True, separators=(",",":"))
     digest = hashlib.sha256(canonical.encode()).hexdigest()
     print(f"PLAN execution_candidate account={p['account']} profile={p['placement_profile']} action=create_instance")
