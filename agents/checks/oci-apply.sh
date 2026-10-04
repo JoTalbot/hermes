@@ -75,6 +75,11 @@ if shape not in set(ex.get("allowed_shapes") or []):
 compartments=a.get("compartment_ocids") or ([a.get("tenancy_ocid")] if a.get("tenancy_ocid") else [])
 if p["compartment_ocid"] not in compartments:
     print("BLOCK placement compartment is not declared in the account registry"); audit_row("blocked",False,"compartment"); sys.exit(0)
+max_actions=int(ex.get("max_actions_per_run") or 1)
+if max_actions < 1:
+    print("BLOCK max_actions_per_run must be at least 1"); audit_row("blocked",False,"invalid-max-actions"); sys.exit(0)
+if max_actions != 1:
+    print("BLOCK v1.1 apply accepts exactly one mutation per invocation"); audit_row("blocked",False,"single-action-only"); sys.exit(0)
 rows=[]
 for comp in compartments:
     cmd=[oci,"compute","instance","list","-c",comp,"--region",p["region"],
@@ -82,19 +87,30 @@ for comp in compartments:
     r=subprocess.run(cmd,capture_output=True,text=True,timeout=90)
     if r.returncode:
         print("BLOCK fresh account-wide inventory failed; no mutation attempted"); audit_row("blocked",False,"inventory-failed"); sys.exit(0)
-    rows.extend(json.loads(r.stdout).get("data",[]))
-cpu=sum(float(x.get("shape-config",{}).get("ocpus") or 0) for x in rows if x.get("shape") == "VM.Standard.A1.Flex")
-mem=sum(float(x.get("shape-config",{}).get("memory-in-gbs") or 0) for x in rows if x.get("shape") == "VM.Standard.A1.Flex")
-maxcpu=float(ex.get("max_total_ocpus") or 0)
-maxmem=float(ex.get("max_total_memory_gib") or 0)
-if len(rows)>=int(ex.get("max_instances") or 0) or cpu>=maxcpu or mem>=maxmem:
-    print(f"BLOCK no Free Tier A1 headroom: instances={len(rows)} a1_cpu={cpu:g}/{maxcpu:g} a1_memory={mem:g}/{maxmem:g}")
-    audit_row("blocked",False,"headroom"); sys.exit(0)
+    try:
+        rows.extend(json.loads(r.stdout).get("data",[]))
+    except Exception:
+        print("BLOCK fresh account-wide inventory returned invalid JSON; no mutation attempted"); audit_row("blocked",False,"inventory-invalid"); sys.exit(0)
+shape=shape.strip()
+shape_rows=[x for x in rows if x.get("shape")==shape]
+shape_limit=(ex.get("shape_limits") or {}).get(shape) or {}
+maxcpu=float(shape_limit.get("max_total_ocpus") or ex.get("max_total_ocpus") or 0)
+maxmem=float(shape_limit.get("max_total_memory_gib") or ex.get("max_total_memory_gib") or 0)
+maxinstances=int(shape_limit.get("max_instances") or ex.get("max_instances") or 0)
+if maxinstances and len(shape_rows)>=maxinstances:
+    print(f"BLOCK no {shape} instance headroom: instances={len(shape_rows)}/{maxinstances}")
+    audit_row("blocked",False,"headroom-instances"); sys.exit(0)
+if shape == "VM.Standard.A1.Flex":
+    cpu=sum(float(x.get("shape-config",{}).get("ocpus") or 0) for x in shape_rows)
+    mem=sum(float(x.get("shape-config",{}).get("memory-in-gbs") or 0) for x in shape_rows)
+else:
+    cpu=mem=0.0
 shape_cfg=p.get("shape_config") or {}
 ocpus=float(shape_cfg.get("ocpus") or 1)
-memory=float(shape_cfg.get("memory_in_gbs") or 6)
-if cpu+ocpus>maxcpu or mem+memory>maxmem:
-    print("BLOCK requested shape configuration exceeds policy headroom"); audit_row("blocked",False,"requested-headroom"); sys.exit(0)
+memory=float(shape_cfg.get("memory_in_gbs") or shape_cfg.get("memoryInGBs") or 6)
+if shape == "VM.Standard.A1.Flex" and (maxcpu and cpu+ocpus>maxcpu or maxmem and mem+memory>maxmem):
+    print(f"BLOCK requested {shape} configuration exceeds policy headroom: ocpus={cpu+ocpus:g}/{maxcpu:g} memory_gib={mem+memory:g}/{maxmem:g}")
+    audit_row("blocked",False,"requested-headroom"); sys.exit(0)
 display=p.get("display_name") or f"hermes-{account}-{int(time.time())}"
 cmd=[oci,"compute","instance","launch","-c",p["compartment_ocid"],"--availability-domain",p["availability_domain"],
      "--subnet-id",p["subnet_ocid"],"--image-id",p["image_ocid"],"--shape",shape,
