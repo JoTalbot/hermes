@@ -54,3 +54,26 @@ A failed OCI launch is recorded as an attempted mutation and returns FAIL. The e
 v1.1 also exposes a read-only `capacity-plan` handler. It inventories only each account's home region, evaluates the configured execution profiles against the effective shape limits, and ranks candidates by remaining capacity.
 
 The allocator does not create, delete, resize or move resources. A `CANDIDATE` is only a placement recommendation; normal execution-plan, approval, fresh-inventory and apply gates still apply.
+
+
+## First real-node bootstrap
+
+After installing the OCI CLI and placing the two-account registry on a Hermes node, run the
+read-only validator before any execution policy is enabled:
+
+```bash
+bash /opt/hermes/scripts/oci-bootstrap-check.sh
+```
+
+The validator checks that the registry is readable, every account has the required non-secret
+metadata, and OCI identity calls succeed for each configured profile. It does not create, delete,
+resize or otherwise mutate OCI resources. It never prints API keys or private key material.
+
+For an isolated test node, override the paths without modifying the repository:
+
+```bash
+OCI_ACCOUNTS_CONFIG=/path/to/accounts.yaml bash scripts/oci-bootstrap-check.sh
+```
+
+A successful bootstrap check proves only authentication and registry correctness. It does not
+approve execution and does not establish that a requested VM fits current Always Free capacity.
