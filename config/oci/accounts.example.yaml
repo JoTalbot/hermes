@@ -14,6 +14,7 @@ accounts: []
 #     compartment_ocids: []
 #     home_region: us-ashburn-1
 #     regions: [us-ashburn-1]
+#     execution_profiles: [a1-home]
 #     free_tier:
 #       allowed_shapes: [VM.Standard.A1.Flex]
 #       max_total_ocpus: 2
