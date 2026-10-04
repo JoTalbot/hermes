@@ -72,18 +72,23 @@ if missing:
 shape=p["shape"]
 if shape not in set(ex.get("allowed_shapes") or []):
     print(f"BLOCK shape={shape} is not execution-allowlisted"); audit_row("blocked",False,"shape"); sys.exit(0)
-cmd=[oci,"compute","instance","list","-c",p["compartment_ocid"],"--region",p["region"],
-     "--profile",a.get("profile","DEFAULT"),"--all","--output","json"]
-r=subprocess.run(cmd,capture_output=True,text=True,timeout=90)
-if r.returncode:
-    print("BLOCK fresh inventory failed; no mutation attempted"); audit_row("blocked",False,"inventory-failed"); sys.exit(0)
-rows=json.loads(r.stdout).get("data",[])
-cpu=sum(float(x.get("shape-config",{}).get("ocpus") or 0) for x in rows)
-mem=sum(float(x.get("shape-config",{}).get("memory-in-gbs") or 0) for x in rows)
+compartments=a.get("compartment_ocids") or ([a.get("tenancy_ocid")] if a.get("tenancy_ocid") else [])
+if p["compartment_ocid"] not in compartments:
+    print("BLOCK placement compartment is not declared in the account registry"); audit_row("blocked",False,"compartment"); sys.exit(0)
+rows=[]
+for comp in compartments:
+    cmd=[oci,"compute","instance","list","-c",comp,"--region",p["region"],
+         "--profile",a.get("profile","DEFAULT"),"--all","--output","json"]
+    r=subprocess.run(cmd,capture_output=True,text=True,timeout=90)
+    if r.returncode:
+        print("BLOCK fresh account-wide inventory failed; no mutation attempted"); audit_row("blocked",False,"inventory-failed"); sys.exit(0)
+    rows.extend(json.loads(r.stdout).get("data",[]))
+cpu=sum(float(x.get("shape-config",{}).get("ocpus") or 0) for x in rows if x.get("shape") == "VM.Standard.A1.Flex")
+mem=sum(float(x.get("shape-config",{}).get("memory-in-gbs") or 0) for x in rows if x.get("shape") == "VM.Standard.A1.Flex")
 maxcpu=float(ex.get("max_total_ocpus") or 0)
 maxmem=float(ex.get("max_total_memory_gib") or 0)
 if len(rows)>=int(ex.get("max_instances") or 0) or cpu>=maxcpu or mem>=maxmem:
-    print(f"BLOCK no Free Tier headroom: instances={len(rows)} cpu={cpu:g}/{maxcpu:g} memory={mem:g}/{maxmem:g}")
+    print(f"BLOCK no Free Tier A1 headroom: instances={len(rows)} a1_cpu={cpu:g}/{maxcpu:g} a1_memory={mem:g}/{maxmem:g}")
     audit_row("blocked",False,"headroom"); sys.exit(0)
 shape_cfg=p.get("shape_config") or {}
 ocpus=float(shape_cfg.get("ocpus") or 1)
