@@ -5,6 +5,7 @@ cd "$ROOT"
 
 echo "[OCI] release gate"
 bash tests/oci-agent-selftest.sh
+bash tests/oci-bootstrap-selftest.sh
 bash tests/oci-execution-selftest.sh
 bash tests/oci-execution-integration.sh
 bash tests/oci-capacity-integration.sh
