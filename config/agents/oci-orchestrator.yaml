@@ -27,6 +27,8 @@ context_scopes:
 - policy: config/policies/agent-policy.yaml
 - task: kanban task body + linked comments
 - oci-policy: /etc/hermes/oci/accounts.yaml
+- oci-execution-policy: /etc/hermes/oci/execution-policy.yaml
+- oci-audit: /var/lib/hermes-agents/oci-execution.jsonl
 - excluded:
   - /root/.oci/*.pem
   - /home/ubuntu/.oci/*.pem
