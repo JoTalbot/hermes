@@ -7,9 +7,10 @@ Hermes now contains an OCI multi-account observe/plan agent for managing Oracle 
 - config/oci/accounts.example.yaml is the non-secret account registry template.
 - Runtime credentials remain in OCI CLI profiles/configuration and are never committed.
 - oci-orchestrator validates account access, inventories Compute instances, evaluates configured Free Tier ceilings, and produces placement candidates.
+- v1.1 adds a separately gated execution path for approved instance launches.
 - allow_paid defaults to false.
 - Missing policy, incomplete inventory, unknown shapes, or exhausted headroom produce BLOCK, never an optimistic plan.
-- The first release deliberately has no create/delete/update handlers. Execution must be introduced later as a separately reviewed capability with policy gates.
+- Execution is separately reviewed and approval-gated. v1.1 implements only create_instance, with execution disabled by default, paid resources forbidden, fresh inventory rechecked immediately before mutation, and every attempt audited.
 
 ## Runtime registry
 
@@ -27,7 +28,9 @@ The guardrails are intentionally configurable rather than assuming a universal q
 | inventory | Compute inventory | none |
 | free-tier | consumption vs policy | none |
 | plan | placement candidates | none |
+| execution-plan | deterministic execution candidate + plan hash | none |
+| apply | approval-gated instance launch | create_instance only |
 
 ## Release boundary
 
-This release is a control-plane foundation. It can observe and plan across multiple OCI accounts, but cannot provision, resize, delete, mutate IAM, or modify security lists. That separation prevents an agent hallucination from becoming an unexpectedly billable cloud resource.
+The v1.1 control plane can execute only a narrowly defined, approved create_instance action. It cannot delete or resize resources, mutate IAM, modify security lists, or enable paid provisioning. The execution policy is disabled by default.
