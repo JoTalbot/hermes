@@ -12,8 +12,9 @@ accounts: []
 #     tenancy_ocid: ocid1.tenancy.oc1..REDACTED
 #     user_ocid: ocid1.user.oc1..REDACTED
 #     compartment_ocids: []
+#     home_region: us-ashburn-1
 #     regions: [us-ashburn-1]
 #     free_tier:
-#       allowed_shapes: [VM.Standard.A1.Flex, VM.Standard.E2.1.Micro]
-#       max_total_ocpus: 4
-#       max_total_memory_gib: 24
+#       allowed_shapes: [VM.Standard.A1.Flex]
+#       max_total_ocpus: 2
+#       max_total_memory_gib: 12
