@@ -611,6 +611,9 @@ else
 fi
 
 
+echo "[OCI] multi-account orchestrator self-test"
+bash tests/oci-agent-selftest.sh
+
 echo "[18] the answer says which model really served it"
 cd "$REPO_ROOT"
 
