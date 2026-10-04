@@ -25,7 +25,7 @@ The executor is intentionally narrow:
 - /var/lib/hermes-agents/oci-approvals/: short-lived approval markers.
 - /var/lib/hermes-agents/oci-execution.jsonl: append-only execution audit.
 
-The example policy is deliberately disabled. To enable execution on a node, an operator must create the runtime policy with enabled: true, keep allow_paid: false, and define reviewed placement profiles.
+The example policy is deliberately disabled. Its A1 defaults are capped at 2 OCPUs and 12 GiB, matching Oracle's current Always Free A1 allowance. Compute execution also requires the account home region. To enable execution on a node, an operator must create the runtime policy with enabled: true, keep allow_paid: false, and define reviewed placement profiles.
 
 ## Placement profile
 
