@@ -133,6 +133,15 @@ CORE = {
                   "targets": f"bash {CHECKS}/monitoring-targets.sh",
                   "lookup": f"bash {CHECKS}/lookup.sh",
                   "ask": None, "identity": None, "ping": None}),
+    "oci-orchestrator": dict(
+        purpose="OCI multi-account orchestration: account auth, resource inventory, Free Tier guardrails and placement planning.",
+        capabilities=["oci", "cloud", "multi-account", "free-tier", "resource-inventory", "capacity-planning"],
+        handlers={"accounts": f"bash {CHECKS}/oci-accounts.sh",
+                  "inventory": f"bash {CHECKS}/oci-inventory.sh",
+                  "free-tier": f"bash {CHECKS}/oci-free-tier.sh",
+                  "plan": f"bash {CHECKS}/oci-plan.sh",
+                  "lookup": f"bash {CHECKS}/lookup.sh",
+                  "ask": None, "identity": None, "ping": None}),
     "backup": dict(
         purpose="Резервные копии и восстановление: свежесть, целостность, "
                 "репетиция восстановления.",
