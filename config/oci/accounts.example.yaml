@@ -1,0 +1,19 @@
+# OCI account registry. NEVER put private keys, tokens or passwords here.
+# Copy to /etc/hermes/oci/accounts.yaml on a node and chmod 0600.
+version: 1
+defaults:
+  allow_paid: false
+  regions: []
+accounts: []
+# Example:
+# accounts:
+#   - name: primary
+#     profile: DEFAULT
+#     tenancy_ocid: ocid1.tenancy.oc1..REDACTED
+#     user_ocid: ocid1.user.oc1..REDACTED
+#     compartment_ocids: []
+#     regions: [us-ashburn-1]
+#     free_tier:
+#       allowed_shapes: [VM.Standard.A1.Flex, VM.Standard.E2.1.Micro]
+#       max_total_ocpus: 4
+#       max_total_memory_gib: 24
