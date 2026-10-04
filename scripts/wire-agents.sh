@@ -180,7 +180,8 @@ def block(agent_id, purpose, capabilities, handlers, extra_lines=()):
             continue
         lines.append(f"    {name}:")
         lines.append(f"      run: {spec['run'] if isinstance(spec, dict) else spec}")
-        lines.append("      timeout: 180")
+        timeout = int((spec or {}).get("timeout", 180)) if isinstance(spec, dict) else 180
+        lines.append(f"      timeout: {timeout}")
         env = (spec or {}).get("env") if isinstance(spec, dict) else None
         if env:
             lines.append("      env:")
