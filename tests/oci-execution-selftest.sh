@@ -18,6 +18,9 @@ grep -q 'max_instances' "$ROOT/agents/checks/oci-free-tier.sh" && ok "per-shape 
 grep -q 'shape_limits' "$ROOT/agents/checks/oci-apply.sh" && ok "apply enforces per-shape limits" || bad "apply per-shape enforcement missing"
 grep -q 'max_actions_per_run' "$ROOT/agents/checks/oci-apply.sh" && ok "apply enforces action-count ceiling" || bad "apply action-count ceiling missing"
 grep -q 'inventory-invalid' "$ROOT/agents/checks/oci-apply.sh" && ok "invalid inventory is fail-closed" || bad "invalid inventory is not fail-closed"
+grep -q 'OCI_ACCOUNTS_CONFIG:-/etc/hermes/oci/accounts.yaml' "$ROOT/agents/checks/oci-apply.sh" && ok "apply supports isolated config injection" || bad "apply config injection missing"
+grep -q 'OCI_EXECUTION_POLICY:-/etc/hermes/oci/execution-policy.yaml' "$ROOT/agents/checks/oci-apply.sh" && ok "apply supports isolated policy injection" || bad "apply policy injection missing"
+grep -q 'OCI_BIN:-/home/ubuntu/oci-venv/bin/oci' "$ROOT/agents/checks/oci-apply.sh" && ok "apply supports OCI CLI injection" || bad "apply OCI CLI injection missing"
 if grep -nE 'oci .* (delete|update)|--force|iam .*create|network .*create' "$ROOT/agents/checks/oci-"*.sh >/dev/null 2>&1; then
   bad "OCI handlers contain forbidden delete/update/force/IAM/network mutation patterns"
 else
