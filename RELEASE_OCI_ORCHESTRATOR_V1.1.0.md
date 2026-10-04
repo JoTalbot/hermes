@@ -7,6 +7,7 @@
 - Short-lived, exact-hash approval markers.
 - Fresh Compute inventory immediately before a mutation.
 - Free Tier shape, OCPU, memory and instance-count ceilings enforced again at apply time.
+- Release defaults aligned with Oracle Always Free A1: 2 OCPUs and 12 GiB, with Compute restricted to the account home region.
 - OCI instance launch executor for `create_instance`.
 - Append-only JSONL audit trail for blocked and attempted executions.
 - Execution self-test integrated into `tests/run.sh`.
