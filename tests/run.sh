@@ -133,7 +133,9 @@ INFOFN="$(grep -m1 '^info(){' scripts/doctor.sh || true)"
 ck "an informational line never counts as a warning" "0" \
    "$(WARN=0 bash -c "${INFOFN}; info x y >/dev/null; printf %s \"\$WARN\"")"
 ck "secret scan clean on repo" "clean" "$(bash scripts/secret-scan.sh --worktree)"
-echo "[8] agent bus + agent wiring (static)"
+echo "[8] OCI execution gate"
+bash tests/oci-execution-selftest.sh
+echo "[9] agent bus + agent wiring (static)"
 ck "bus.py compiles" "ok" "$(python3 -m py_compile bus/bus.py && echo ok || echo fail)"
 ck "bus_bridge.py compiles" "ok" "$(python3 -m py_compile bus/bus_bridge.py && echo ok || echo fail)"
 ck "runtime.py compiles" "ok" "$(python3 -m py_compile agents/runtime.py && echo ok || echo fail)"
@@ -179,7 +181,7 @@ ck "agent actions stay inside /opt/hermes (no handler runs outside the managed s
 grep -hE 'run: bash' config/agents/*.yaml config/agents/projects/*.yaml | grep -v '/opt/hermes' | head -3 | \
   { read -r l && echo "outside: $l" || echo ok; }
 )"
-echo "[9] agent bus: live round trip (skipped when the bus is down)"
+echo "[10] agent bus: live round trip (skipped when the bus is down)"
 if systemctl is-active --quiet nats-server 2>/dev/null; then
   if bash tests/bus-selftest.sh >/tmp/bus-selftest.out 2>&1; then
     ck "live bus selftest" "PASS=10 FAIL=0 WARN=0" "$(grep -o 'PASS=[0-9]* FAIL=[0-9]* WARN=[0-9]*' /tmp/bus-selftest.out | tail -1)"
@@ -189,13 +191,13 @@ if systemctl is-active --quiet nats-server 2>/dev/null; then
 else
   SKIP=$((SKIP+1)); echo "  SKIP  nats-server is not running on this host"
 fi
-echo "[10] telegram inbox: the owner's control plane is guarded"
+echo "[11] telegram inbox: the owner's control plane is guarded"
 ck "poll subcommand exists in the bridge" "poll" "$(grep -cE 'add_parser\(\"poll\"\)' bus/bus_bridge.py) poll"
 ck "unknown chats are ignored, never executed" "non-allowlisted" "$(grep -o 'ignoring command from non-allowlisted chat' bus/bus_bridge.py | head -1)"
 ck "owner text never reaches a shell" "ok" "$(grep -qE 'handle_owner_text' bus/bus_bridge.py && ! grep -qE 'shell=True|os\.system' bus/bus_bridge.py && echo ok)"
 ck "inbox unit shipped for a new node" "hermes-telegram-inbox.service" "$(grep -o 'hermes-telegram-inbox.service' scripts/install-bus.sh | head -1)"
 ck "inbox unit installed when a chat exists" "hermes-telegram-inbox" "$(systemctl list-unit-files 2>/dev/null | grep -o 'hermes-telegram-inbox' | head -1)"
-echo "[11] owner chat: a task typed in Telegram really reaches an agent"
+echo "[12] owner chat: a task typed in Telegram really reaches an agent"
 PYBIN="/opt/hermes/.venv-bus/bin/python"
 [[ -x "$PYBIN" ]] || PYBIN="$(command -v python3)"
 CHAT_PROBE="$("$PYBIN" tests/probe-chat.py 2>&1)" || true
@@ -243,13 +245,13 @@ ck "a real report mentioning a selftest word still reaches the owner" \
 ck "tagged bus-selftest messages stay off the phone" \
    "forward-selftest-tagged-silenced=True" "$CHAT_PROBE"
 ck "a failed handler always reaches the owner" "forward-error-always=True" "$CHAT_PROBE"
-echo "[12] agents: capabilities, answer format and model policy"
+echo "[13] agents: capabilities, answer format and model policy"
 if bash tests/agents-selftest.sh >/tmp/agents-selftest.out 2>&1; then
   ck "agents selftest" "PASS=" "$(grep -o 'PASS=[0-9]* FAIL=[0-9]*' /tmp/agents-selftest.out | tail -1)_$(echo ok)"
 else
   ck "agents selftest" "FAIL=0" "$(grep -o 'PASS=[0-9]* FAIL=[0-9]*' /tmp/agents-selftest.out | tail -1)"
 fi
-echo "[13] resilience: memory protection and alerts that actually reach the owner"
+echo "[14] resilience: memory protection and alerts that actually reach the owner"
 ck "host pressure is measured (the box OOMs on someone else's browser)" \
    "def probe_host_pressure" "$(grep -o 'def probe_host_pressure' scripts/hermes_metrics_exporter.py | head -1)"
 ck "an unreadable project is not reported as a missing one" \
