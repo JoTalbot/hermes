@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-CONFIG=/etc/hermes/oci/accounts.yaml
-POLICY=/etc/hermes/oci/execution-policy.yaml
-OCI=/home/ubuntu/oci-venv/bin/oci
+CONFIG="${OCI_ACCOUNTS_CONFIG:-/etc/hermes/oci/accounts.yaml}"
+POLICY="${OCI_EXECUTION_POLICY:-/etc/hermes/oci/execution-policy.yaml}"
+OCI="${OCI_BIN:-/home/ubuntu/oci-venv/bin/oci}"
 [[ -x "$OCI" ]] || OCI="$(command -v oci || true)"
 [[ -n "$OCI" ]] || { echo "BLOCK OCI CLI not installed"; exit 0; }
 [[ -f "$CONFIG" && -f "$POLICY" ]] || { echo "BLOCK OCI execution config/policy missing"; exit 0; }
