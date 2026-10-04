@@ -46,6 +46,10 @@ per_role:
     shell_allowlist: [tar, gzip, rsync, pg_dump, git]
     targets: ["/opt/hermes/state/backups", "restic:*"]
     never_read: ["/etc/octopus/secrets.env", "/home/ubuntu/.hermes/.env"]
+  oci-orchestrator:
+    can_run_shell: false
+    execution: "declared handlers only; create_instance remains policy-gated and disabled by default"
+    never_read: ["/root/.oci/*.pem", "/home/ubuntu/.oci/*.pem", "~/.ssh/*"]
   project-agent:
     can_run_shell: true
     workdir: "$PROJECT_PATH"         # jailed to its own project
