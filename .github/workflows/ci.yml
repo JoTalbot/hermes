@@ -45,14 +45,5 @@ jobs:
       - name: Install YAML dependency
         run: python -m pip install --disable-pip-version-check pyyaml
 
-      - name: OCI execution self-test
-        run: bash tests/oci-execution-selftest.sh
-
-      - name: OCI multi-account static self-test
-        run: bash tests/oci-agent-selftest.sh
-
-      - name: OCI fake execution integration
-        run: bash tests/oci-execution-integration.sh
-
-      - name: OCI fake capacity integration
-        run: bash tests/oci-capacity-integration.sh
+      - name: OCI release gate
+        run: bash tests/oci-release-gate.sh
