@@ -51,7 +51,7 @@ safety:
 # --- agent bus wiring (managed by scripts/wire-agents.sh — do not hand-edit) ---
 bus:
   agent_id: oci-orchestrator
-  purpose: "OCI multi-account orchestration: account auth, resource inventory, Free Tier guardrails and placement planning."
+  purpose: "OCI multi-account orchestration: inventory, Free Tier guardrails, deterministic planning and approval-gated execution."
   capabilities:
   - oci
   - cloud
@@ -59,6 +59,9 @@ bus:
   - free-tier
   - resource-inventory
   - capacity-planning
+  - execution-gates
+  - approval
+  - audit
   handlers:
     accounts:
       run: bash /opt/hermes/agents/checks/oci-accounts.sh
@@ -72,6 +75,12 @@ bus:
     plan:
       run: bash /opt/hermes/agents/checks/oci-plan.sh
       timeout: 180
+    execution-plan:
+      run: bash /opt/hermes/agents/checks/oci-execution-plan.sh
+      timeout: 180
+    apply:
+      run: bash /opt/hermes/agents/checks/oci-apply.sh
+      timeout: 240
     lookup:
       run: bash /opt/hermes/agents/checks/lookup.sh
       timeout: 180
