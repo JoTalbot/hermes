@@ -13,6 +13,7 @@
 - Execution self-test integrated into `tests/run.sh`.
 - Fake-OCI integration test covers plan → approval → apply → audit and invalid-plan rejection without cloud mutation.
 - Agent policy and bus wiring for execution-plan/apply handlers.
+- Read-only multi-account capacity planner scoped to each account home region.
 
 ## Safety boundary
 
