@@ -135,6 +135,7 @@ ck "an informational line never counts as a warning" "0" \
 ck "secret scan clean on repo" "clean" "$(bash scripts/secret-scan.sh --worktree)"
 echo "[8] OCI execution gate"
 bash tests/oci-execution-selftest.sh
+bash tests/oci-execution-integration.sh
 echo "[9] agent bus + agent wiring (static)"
 ck "bus.py compiles" "ok" "$(python3 -m py_compile bus/bus.py && echo ok || echo fail)"
 ck "bus_bridge.py compiles" "ok" "$(python3 -m py_compile bus/bus_bridge.py && echo ok || echo fail)"
