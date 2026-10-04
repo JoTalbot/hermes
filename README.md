@@ -14,7 +14,7 @@
 | LLM Balancer | ✅ `octopus-aios-bridge` on `127.0.0.1:9600` (11 providers); the shim on `:9700` exposes 6 tier aliases |
 | Hermes → Balancer rewiring | ✅ done (2026-09-17). The 98 %-disk blocker is gone: 52 % used, 71 GB free (2026-09-22) |
 | Tailscale | ✅ installed and up (node `100.109.170.74`, 2026-09-22) |
-| OCI multi-account orchestrator | ✅ observe/inventory/Free Tier planning foundation; provisioning intentionally disabled |
+| OCI multi-account orchestrator | ✅ v1.1: observe/inventory/Free Tier planning + approval-gated create_instance; execution disabled by default |
 | GitHub sync | ✅ this repo · wave of 2026-09-19 recorded on 2026-09-22 — see `docs/MILESTONE-2026-09-22-wave-20260919.md` |
 
 ## What already exists on the server (do not rebuild this)
