@@ -62,6 +62,9 @@ if not a or not p:
     print("BLOCK unknown account or placement profile"); audit_row("blocked",False,"unknown-target"); sys.exit(0)
 if a.get("allow_paid",False) or (a.get("free_tier") or {}).get("allow_paid",False):
     print("BLOCK target account allows paid resources; execution refuses it"); audit_row("blocked",False,"account-paid"); sys.exit(0)
+home_region=a.get("home_region")
+if not home_region or p.get("region") != home_region:
+    print("BLOCK Compute execution must target the account home_region for Always Free"); audit_row("blocked",False,"non-home-region"); sys.exit(0)
 required=["region","compartment_ocid","availability_domain","subnet_ocid","image_ocid","shape"]
 missing=[k for k in required if not p.get(k)]
 if missing:
