@@ -11,10 +11,9 @@ execution:
     - create_instance
   allowed_shapes:
     - VM.Standard.A1.Flex
-    - VM.Standard.E2.1.Micro
-  max_total_ocpus: 4
-  max_total_memory_gib: 24
-  max_instances: 4
+  max_total_ocpus: 2
+  max_total_memory_gib: 12
+  max_instances: 2
   audit_log: /var/lib/hermes-agents/oci-execution.jsonl
   approval_dir: /var/lib/hermes-agents/oci-approvals
   placement_profiles: []
