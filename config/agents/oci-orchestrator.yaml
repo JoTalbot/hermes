@@ -61,6 +61,7 @@ bus:
   - free-tier
   - resource-inventory
   - capacity-planning
+  - capacity-allocation
   - execution-gates
   - approval
   - audit
@@ -80,6 +81,9 @@ bus:
     execution-plan:
       run: bash /opt/hermes/agents/checks/oci-execution-plan.sh
       timeout: 180
+    capacity-plan:
+      run: bash /opt/hermes/agents/checks/oci-capacity-plan.sh
+      timeout: 240
     apply:
       run: bash /opt/hermes/agents/checks/oci-apply.sh
       timeout: 240
