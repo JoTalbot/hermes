@@ -45,3 +45,34 @@ safety:
   - fresh inventory before any plan
   - explicit Free Tier policy for every target account
   rationale: 'The first release is an observe/plan control plane. Execution is intentionally separated from planning.'
+
+# --- agent bus wiring (managed by scripts/wire-agents.sh — do not hand-edit) ---
+bus:
+  agent_id: oci-orchestrator
+  purpose: "OCI multi-account orchestration: account auth, resource inventory, Free Tier guardrails and placement planning."
+  capabilities:
+  - oci
+  - cloud
+  - multi-account
+  - free-tier
+  - resource-inventory
+  - capacity-planning
+  handlers:
+    accounts:
+      run: bash /opt/hermes/agents/checks/oci-accounts.sh
+      timeout: 180
+    inventory:
+      run: bash /opt/hermes/agents/checks/oci-inventory.sh
+      timeout: 180
+    free-tier:
+      run: bash /opt/hermes/agents/checks/oci-free-tier.sh
+      timeout: 180
+    plan:
+      run: bash /opt/hermes/agents/checks/oci-plan.sh
+      timeout: 180
+    lookup:
+      run: bash /opt/hermes/agents/checks/lookup.sh
+      timeout: 180
+    ask: {}
+    identity: {}
+    ping: {}
