@@ -4,7 +4,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 fail=0
 ok(){ echo "OK  $1"; }
 bad(){ echo "FAIL $1"; fail=1; }
-for f in agents/checks/oci-execution-plan.sh agents/checks/oci-apply.sh; do
+for f in agents/checks/oci-execution-plan.sh agents/checks/oci-apply.sh agents/checks/oci-capacity-plan.sh; do
   [[ -f "$ROOT/$f" ]] && ok "$f exists" || bad "$f missing"
   bash -n "$ROOT/$f" && ok "$f syntax" || bad "$f syntax"
 done
@@ -21,6 +21,8 @@ grep -q 'inventory-invalid' "$ROOT/agents/checks/oci-apply.sh" && ok "invalid in
 grep -q 'OCI_ACCOUNTS_CONFIG:-/etc/hermes/oci/accounts.yaml' "$ROOT/agents/checks/oci-apply.sh" && ok "apply supports isolated config injection" || bad "apply config injection missing"
 grep -q 'OCI_EXECUTION_POLICY:-/etc/hermes/oci/execution-policy.yaml' "$ROOT/agents/checks/oci-apply.sh" && ok "apply supports isolated policy injection" || bad "apply policy injection missing"
 grep -q 'OCI_BIN:-/home/ubuntu/oci-venv/bin/oci' "$ROOT/agents/checks/oci-apply.sh" && ok "apply supports OCI CLI injection" || bad "apply OCI CLI injection missing"
+grep -q "capacity-plan:" "$ROOT/config/agents/oci-orchestrator.yaml" && ok "capacity planner wired" || bad "capacity planner wiring missing"
+grep -q "capacity-allocation" "$ROOT/config/agents/oci-orchestrator.yaml" && ok "capacity allocation capability declared" || bad "capacity allocation capability missing"
 if grep -nE 'oci .* (delete|update)|--force|iam .*create|network .*create' "$ROOT/agents/checks/oci-"*.sh >/dev/null 2>&1; then
   bad "OCI handlers contain forbidden delete/update/force/IAM/network mutation patterns"
 else
